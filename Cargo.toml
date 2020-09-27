@@ -1,0 +1,14 @@
+[package]
+name = "pokemon-battle-analysis-v4"
+version = "0.1.0"
+authors = ["Wallace Watler <watlerkw@msoe.edu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+almost = "0.2.0"
+lazy_static = "1.4.0"
+rand = "0.7.3"
+strum = "0.19.2"
+strum_macros = "0.19.2"
