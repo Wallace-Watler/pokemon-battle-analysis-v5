@@ -120,7 +120,7 @@ impl MoveAction {
             user.move_pp[move_index] -= 1;
         }
 
-        for target_pos in &self.target_positions {
+        for target_pos in self.target_positions {
             let target = if target_pos == FieldPosition::Min {
                 state.min_pokemon_id.map(|min_pokemon_id| state.pokemon_by_id_mut(min_pokemon_id))
             } else {

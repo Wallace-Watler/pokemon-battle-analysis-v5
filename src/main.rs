@@ -6,7 +6,6 @@ use rand::Rng;
 use std::{env, intrinsics::transmute};
 use std::cmp::max;
 use std::fmt::{Display, Debug, Error, Formatter};
-use strum_macros::Display;
 use crate::move_::Move;
 
 mod move_;
@@ -32,7 +31,7 @@ fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
 }
 
 fn choose_weighted_index(weights: &[f64]) -> usize {
-    if weights.iter().any(|d| !almost::zero(*d) && *d < 0.0) {
+    if weights.is_empty() || weights.iter().any(|d| !almost::zero(*d) && *d < 0.0) {
         panic!(format!("Weights must be non-negative. Given weights: {:?}", weights));
     }
 
@@ -599,13 +598,13 @@ impl Pokemon {
         }
     }
 
-    fn increment_snore_sleep_talk_counter(&mut self, game_version: &GameVersion, state: &mut State) {
+    fn increment_snore_sleep_talk_counter(&mut self, game_version: &GameVersion, display_text: &mut Vec<String>) {
         if self.major_status_ailment != MajorStatusAilment::Asleep { panic!("snore_sleep_talk_counter incremented while not asleep"); }
         if let Some(msa_counter_target) = self.msa_counter_target {
             if game_version.gen() == 3 {
                 self.snore_sleep_talk_counter += 1;
                 if self.snore_sleep_talk_counter >= msa_counter_target {
-                    state.display_text.push(format!("{}{}", self.species.name, MajorStatusAilment::Asleep.display_text_when_cured()));
+                    display_text.push(format!("{}{}", self.species.name, MajorStatusAilment::Asleep.display_text_when_cured()));
                     self.major_status_ailment = MajorStatusAilment::Okay;
                     self.snore_sleep_talk_counter = 0;
                     self.msa_counter = 0;
@@ -616,12 +615,12 @@ impl Pokemon {
     }
 
     /// Returns true if the poisoning was successful.
-    fn inflict_poison(&mut self, state: &mut State) -> bool {
+    fn inflict_poison(&mut self, display_text: &mut Vec<String>) -> bool {
         if self.major_status_ailment == MajorStatusAilment::Okay && !self.is_type(Type::Poison) && !self.is_type(Type::Steel) {
             self.major_status_ailment = MajorStatusAilment::Poisoned;
             self.msa_counter = 0;
             self.msa_counter_target = None;
-            state.display_text.push(format!("{} was poisoned!", self.species.name));
+            display_text.push(format!("{} was poisoned!", self.species.name));
             true
         } else {
             false
@@ -629,14 +628,14 @@ impl Pokemon {
     }
 
     /// Returns true if putting this Pokemon to sleep was successful.
-    fn inflict_sleep(&mut self, state: &mut State) -> bool {
+    fn inflict_sleep(&mut self, display_text: &mut Vec<String>) -> bool {
         if self.major_status_ailment == MajorStatusAilment::Okay {
             self.major_status_ailment = MajorStatusAilment::Asleep;
             self.msa_counter = 0;
             // TODO: Use seeded RNG
             self.msa_counter_target = Some(if game_version().gen() <= 4 { rand::thread_rng().gen_range(2, 6) } else { rand::thread_rng().gen_range(1, 4) });
             if game_version().gen() == 3 { self.snore_sleep_talk_counter = 0; }
-            state.display_text.push(format!("{} fell asleep!", self.species.name));
+            display_text.push(format!("{} fell asleep!", self.species.name));
             true
         } else {
             false

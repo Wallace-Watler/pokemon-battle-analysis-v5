@@ -4,38 +4,23 @@ use std::cmp::max;
 use rand::Rng;
 
 const MAX_ACTIONS_PER_AGENT: usize = 9;
-const ADDED_CONSTANT: f64 = 2.0; // Used in calculating Nash equilibria
 
-// TODO: Store heuristic value and don't store payoff matrix
 /// Represents the entire game state of a battle, including metadata such as child states.
 #[derive(Debug)]
 pub struct State {
     // Game state
-    pokemon_by_id: [Pokemon; 12], // ID is the index
-    minimizing_team: [u8; 6], // IDs of the Pokemon on the minimizing team
-    maximizing_team: [u8; 6], // IDs of the Pokemon on the maximizing team
+    pokemon_by_id: [Pokemon; 12], // ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team
     pub min_pokemon_id: Option<u8>, // Pokemon of the minimizing team that is on the field
     pub max_pokemon_id: Option<u8>, // Pokemon of the maximizing team that is on the field
     pub weather: Weather,
     terrain: Terrain,
     turn_number: u32,
+    // TODO: display_text is cleared upon creating a child state anyways, so probably don't include it in State
     pub display_text: Vec<String>, // Battle print-out that is shown when this state is entered; useful for sanity checks
-    battle_ended: bool,
-    //public final Random rand; // RNG used during battle
-
-    // Metadata
-    max_player_num_actions: u8,
-    min_player_num_actions: u8,
-    max_player_strategy: [f64; MAX_ACTIONS_PER_AGENT], // The maximizing player's strategy at equilibrium
-    min_player_strategy: [f64; MAX_ACTIONS_PER_AGENT], // The minimizing player's strategy at equilibrium
-    expected_payoff: f64, // The expected payoff for the maximizing player at equilibrium
-    child_matrix: Vec<Vec<State>>, // An entry at [i][j] is the resultant state of the maximizer and minimizer performing actions i and j, respectively.
-    payoff_matrix: [[f64; MAX_ACTIONS_PER_AGENT]; MAX_ACTIONS_PER_AGENT], // An entry at [i][j] is the maximizer's expected payoff given the maximizer and minimizer perform actions i and j, respectively.
+    child_matrix: Vec<Vec<State>> // An entry at [i][j] is the resultant state of the maximizer and minimizer performing actions i and j, respectively.
 }
 
 impl State {
-    // TODO: Consume the passed in State, return the final state (as well as heuristic value stored within that state)
-    //   - Point is to discard the parent states as soon as possible, otherwise they're dead memory
     /**
      * Run a battle from an initial state; the maximizer and minimizer use game theory to choose their actions. All
      * state-space branching due to chance events during the course of each turn has been removed to reduce
@@ -48,22 +33,22 @@ impl State {
      * @return A heuristic value between -1.0 and 1.0 signifying how well the maximizer did; 0.0 would be a tie. The
      * minimizer's value is just its negation.
      */
-    fn run_battle(mut state: &mut State, ai_level: u8) -> f64 {
+    fn run_battle(mut state: State, ai_level: u8) -> f64 {
         println!("<<<< BATTLE BEGIN >>>>");
 
         state.print_display_text();
-        while !state.battle_ended {
-            state.heuristic_value(ai_level);
-            let child_state = state.child_matrix
-                .get_mut(choose_weighted_index(&state.max_player_strategy)).unwrap()
-                .get_mut(choose_weighted_index(&state.min_player_strategy)).unwrap();
-
-            state = child_state;
+        state.generate_child_states(ai_level);
+        while !state.child_matrix.is_empty() {
+            let nash_eq = state.heuristic_value();
+            state = state.child_matrix
+                .get_mut(choose_weighted_index(&nash_eq.max_player_strategy)).unwrap()
+                .remove(choose_weighted_index(&nash_eq.min_player_strategy));
             state.print_display_text();
+            state.generate_child_states(ai_level);
         }
 
         println!("<<<< BATTLE END >>>>");
-        state.heuristic_value(0)
+        state.heuristic_value().expected_payoff
     }
 
     fn print_display_text(&self) {
@@ -128,60 +113,63 @@ impl State {
         false
     }
 
-    /// Computes the heuristic value of a state, generating new states as necessary.
-    fn heuristic_value(&mut self, mut recursions: u8) -> f64 {
-        if recursions < 1 || self.battle_ended {
-            let team_value = |team: [u8; 6]| -> f64 {
-                team.iter()
-                    .map(|id| self.pokemon_by_id_mut(*id))
-                    .map(|pokemon| pokemon.current_hp as f64 / (pokemon.max_hp as f64 * self.maximizing_team.len() as f64))
-                    .sum()
-            };
-            return team_value(self.maximizing_team) - team_value(self.minimizing_team);
-        }
+    /// Generates new child states for a given number of future turns.
+    fn generate_child_states(&mut self, mut recursions: u8) {
+        if recursions < 1 { return; }
 
-        // Generates new states and recomputes the heuristic value of previously explored states.
         if self.child_matrix.is_empty() {
             match self.min_pokemon_id.zip(self.max_pokemon_id) {
                 None => { // Agent(s) must choose Pokemon to send out
-                    let mut minimizer_choices: Vec<u8> = vec![];
-                    let mut maximizer_choices: Vec<u8> = vec![];
-
-                    if self.min_pokemon_id == None {
-                        for id in &self.minimizing_team {
-                            if self.pokemon_by_id_mut(*id).current_hp > 0 { minimizer_choices.push(*id); }
-                        }
-                    }
-                    if self.max_pokemon_id == None {
-                        for id in &self.maximizing_team {
-                            if self.pokemon_by_id_mut(*id).current_hp > 0 { maximizer_choices.push(*id); }
-                        }
-                    }
-
-                    // TODO: Try setting num of choices directly equal to choices.len() (there shouldn't ever be 0 choices...? But if there is, don't do anything.)
-                    let num_minimizer_choices = max(minimizer_choices.len(), 1);
-                    let num_maximizer_choices = max(maximizer_choices.len(), 1);
-
-                    for maximizer_choice_index in 0..num_maximizer_choices {
-                        let mut inner_vec = vec![];
-                        self.child_matrix.push(inner_vec);
-                        for minimizer_choice_index in 0..num_minimizer_choices {
-                            let mut child_state: State = self.copy_game_state();
-                            child_state.display_text.clear();
-                            inner_vec.push(child_state);
-
-                            if !minimizer_choices.is_empty() {
-                                let battle_ended = child_state
-                                    .pokemon_by_id_mut(*minimizer_choices.get(minimizer_choice_index).unwrap())
-                                    .add_to_field(&mut child_state, FieldPosition::Min);
-                                child_state.display_text.push(String::from(""));
-                                if battle_ended { break; }
+                    match self.min_pokemon_id.xor(self.max_pokemon_id) {
+                        Some(id) => {
+                            if id < 6 { // Only minimizer must choose
+                                let choices: Vec<u8> = (0..5).filter(|id| self.pokemon_by_id(*id).current_hp > 0).collect();
+                                if choices.is_empty() {
+                                    self.display_text.push(String::from(""));
+                                    self.display_text.push(String::from("The maximizing team won!"));
+                                } else {
+                                    let mut inner_vec = vec![];
+                                    self.child_matrix.push(inner_vec);
+                                    for choice in choices {
+                                        let mut child_state = self.copy_game_state();
+                                        inner_vec.push(child_state);
+                                        child_state.pokemon_by_id_mut(choice).add_to_field(&mut child_state, FieldPosition::Min);
+                                        child_state.display_text.push(String::from(""));
+                                    }
+                                }
+                            } else { // Only maximizer must choose
+                                let choices: Vec<u8> = (6..11).filter(|id| self.pokemon_by_id(*id).current_hp > 0).collect();
+                                if choices.is_empty() {
+                                    self.display_text.push(String::from(""));
+                                    self.display_text.push(String::from("The minimizing team won!"));
+                                } else {
+                                    for choice in choices {
+                                        let mut child_state = self.copy_game_state();
+                                        self.child_matrix.push(vec![child_state]);
+                                        child_state.pokemon_by_id_mut(choice).add_to_field(&mut child_state, FieldPosition::Max);
+                                        child_state.display_text.push(String::from(""));
+                                    }
+                                }
                             }
-                            if !maximizer_choices.is_empty() {
-                                child_state
-                                    .pokemon_by_id_mut(*maximizer_choices.get(maximizer_choice_index).unwrap())
-                                    .add_to_field(&mut child_state, FieldPosition::Max);
-                                child_state.display_text.push(String::from(""));
+                        },
+                        None => { // Both agents must choose
+                            let minimizer_choices: Vec<u8> = (0..5).filter(|id| self.pokemon_by_id(*id).current_hp > 0).collect();
+                            let maximizer_choices: Vec<u8> = (6..11).filter(|id| self.pokemon_by_id(*id).current_hp > 0).collect();
+
+                            for maximizer_choice in maximizer_choices {
+                                let mut inner_vec = vec![];
+                                self.child_matrix.push(inner_vec);
+                                for minimizer_choice in minimizer_choices {
+                                    let mut child_state = self.copy_game_state();
+                                    inner_vec.push(child_state);
+
+                                    let battle_ended = child_state.pokemon_by_id_mut(minimizer_choice).add_to_field(&mut child_state, FieldPosition::Min);
+                                    child_state.display_text.push(String::from(""));
+                                    if !battle_ended {
+                                        child_state.pokemon_by_id_mut(maximizer_choice).add_to_field(&mut child_state, FieldPosition::Max);
+                                        child_state.display_text.push(String::from(""));
+                                    }
+                                }
                             }
                         }
                     }
@@ -190,10 +178,10 @@ impl State {
                     recursions += 1;
                 },
                 Some((min_pokemon_id, max_pokemon_id)) => { // Agents must choose actions for each Pokemon
-                    // TODO: Rule out actions that are obviously not optimal to reduce state space size
-                    let generate_move_actions = |user: &mut Pokemon, team: [u8; 6]| -> Vec<MoveAction> {
-                        let min_pokemon = self.pokemon_by_id_mut(min_pokemon_id);
-                        let max_pokemon = self.pokemon_by_id_mut(max_pokemon_id);
+                    // TODO: Rule out actions that are obviously not optimal to reduce search size
+                    let generate_move_actions = |user: &mut Pokemon| -> Vec<MoveAction> {
+                        let min_pokemon = self.pokemon_by_id(min_pokemon_id);
+                        let max_pokemon = self.pokemon_by_id(max_pokemon_id);
                         let mut user_actions: Vec<MoveAction> = vec![];
 
                         if let Some(next_move_action) = user.next_move_action.clone() { // TODO: Is this actually what should happen?
@@ -206,7 +194,7 @@ impl State {
                             }
                         }
 
-                        let add_move_action = |move_: &'static Move, move_index: Option<usize>| {
+                        let mut add_move_action = |move_: &'static Move, move_index: Option<usize>| {
                             user_actions.push(MoveAction {
                                 user_id: user.id,
                                 move_,
@@ -222,7 +210,10 @@ impl State {
                             }
                         }
 
-                        if user_actions.is_empty() { add_move_action(unsafe { &crate::move_::STRUGGLE }, None); } // TODO: Can Struggle be used if switch actions are available?
+                        // TODO: Can Struggle be used if switch actions are available?
+                        if user_actions.is_empty() {
+                            add_move_action(unsafe { &crate::move_::STRUGGLE }, None);
+                        }
 
                         // TODO: Exploring every switch action takes too long; maybe come up with some heuristic to decide when to switch?
                         /*
@@ -236,15 +227,14 @@ impl State {
                     };
 
                     // TODO: Generate switch actions separately
-                    let mut minimizer_move_actions: Vec<MoveAction> = generate_move_actions(self.pokemon_by_id_mut(min_pokemon_id), self.minimizing_team);
-                    let mut maximizer_move_actions: Vec<MoveAction> = generate_move_actions(self.pokemon_by_id_mut(max_pokemon_id), self.maximizing_team);
+                    let mut minimizer_move_actions: Vec<MoveAction> = generate_move_actions(self.pokemon_by_id_mut(min_pokemon_id));
+                    let mut maximizer_move_actions: Vec<MoveAction> = generate_move_actions(self.pokemon_by_id_mut(max_pokemon_id));
 
                     while !maximizer_move_actions.is_empty() {
                         let mut inner_vec = vec![];
                         self.child_matrix.push(inner_vec);
                         while !minimizer_move_actions.is_empty() {
                             let mut child_state = self.copy_game_state();
-                            child_state.display_text.clear();
                             child_state.play_out_turn(vec![minimizer_move_actions.remove(0), maximizer_move_actions.remove(0)]);
                             inner_vec.push(child_state);
                         }
@@ -253,77 +243,45 @@ impl State {
             }
         }
 
-        self.max_player_num_actions = self.child_matrix.len() as u8;
-        self.min_player_num_actions = self.child_matrix.get(0).unwrap().len() as u8;
+        // If there are still no children by this point, the battle has ended
 
-        for maximizer_action_index in 0..self.max_player_num_actions {
-            let inner_vec = self.child_matrix.get(maximizer_action_index as usize).unwrap();
-            for minimizer_action_index in 0..self.min_player_num_actions {
-                self.payoff_matrix[maximizer_action_index as usize][minimizer_action_index as usize] = inner_vec.get(minimizer_action_index as usize).unwrap().heuristic_value(recursions - 1);
+        for inner_vec in &mut self.child_matrix {
+            for child in inner_vec {
+                child.generate_child_states(recursions - 1);
             }
         }
-
-        self.calc_nash_eq();
-
-        /// Diminishing return for future payoffs; 0.0 will ignore future payoffs entirely, while 1.0 will only account for the farthest-out payoffs.
-        const GAMMA: f64 = 0.75;
-        return GAMMA * self.expected_payoff + (1.0 - GAMMA) * self.heuristic_value(0);
     }
 
-    /// Copies only the game state into a new State instance; doesn't copy metadata.
-    fn copy_game_state(&self) -> State {
-        State {
-            pokemon_by_id: self.pokemon_by_id.clone(),
-            minimizing_team: self.minimizing_team.clone(),
-            maximizing_team: self.maximizing_team.clone(),
-            min_pokemon_id: self.min_pokemon_id,
-            max_pokemon_id: self.max_pokemon_id,
-            weather: self.weather,
-            terrain: self.terrain,
-            turn_number: self.turn_number,
-            display_text: self.display_text.clone(),
-            battle_ended: self.battle_ended,
-            max_player_num_actions: 0,
-            min_player_num_actions: 0,
-            max_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
-            min_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
-            expected_payoff: 0.0,
-            child_matrix: vec![],
-            payoff_matrix: [[0.0; MAX_ACTIONS_PER_AGENT]; MAX_ACTIONS_PER_AGENT]
+    /// Recursively computes the heuristic value of a state.
+    const fn heuristic_value(&self) -> ZeroSumNashEq {
+        if self.child_matrix.is_empty() {
+            ZeroSumNashEq {
+                max_player_strategy: vec![],
+                min_player_strategy: vec![],
+                expected_payoff: (self.pokemon_by_id[6..11].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
+                    - self.pokemon_by_id[0..5].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0
+            }
+        } else {
+            let payoff_matrix: Vec<Vec<f64>> = self.child_matrix.iter().map(|inner_vec| {
+                inner_vec.iter().map(|child| child.heuristic_value().expected_payoff).collect()
+            }).collect();
+            State::calc_nash_eq(&Matrix::from(payoff_matrix))
         }
     }
 
-    pub fn pokemon_by_id(&self, id: u8) -> &Pokemon {
-        &self.pokemon_by_id[id as usize]
-    }
-
-    pub fn pokemon_by_id_mut(&mut self, id: u8) -> &mut Pokemon {
-        &mut self.pokemon_by_id[id as usize]
-    }
-
-    pub fn battle_end_check(&mut self) -> bool {
-        if self.minimizing_team.iter().all(|id| self.pokemon_by_id(*id).current_hp == 0) {
-            self.display_text.push(String::from(""));
-            self.display_text.push(String::from("The maximizing team won!"));
-            self.battle_ended = true;
-        } else if self.maximizing_team.iter().all(|id| self.pokemon_by_id(*id).current_hp == 0) {
-            self.display_text.push(String::from(""));
-            self.display_text.push(String::from("The minimizing team won!"));
-            self.battle_ended = true;
-        }
-        self.battle_ended
-    }
-
-    /// Recalculates this state's Nash equilibrium using its payoff matrix.
+    /// Calculates the Nash equilibrium of a zero-sum payoff matrix.
     /// Algorithm follows https://www.math.ucla.edu/~tom/Game_Theory/mat.pdf, section 4.5.
-    fn calc_nash_eq(&mut self) {
-        let m = self.max_player_num_actions as usize;
-        let n = self.min_player_num_actions as usize;
+    fn calc_nash_eq(payoff_matrix: &Matrix) -> ZeroSumNashEq {
+        // Algorithm requires that all elements be positive, so ADDED_CONSTANT is added to ensure this.
+        const ADDED_CONSTANT: f64 = 2.0;
+
+        let m = payoff_matrix.num_rows;
+        let n = payoff_matrix.num_cols;
 
         let mut tableau = [[0.0; MAX_ACTIONS_PER_AGENT + 1]; MAX_ACTIONS_PER_AGENT + 1];
         for i in 0..m {
             for j in 0..n {
-                tableau[i][j] = self.payoff_matrix[i][j] + ADDED_CONSTANT;
+                tableau[i][j] = payoff_matrix.get(i, j).unwrap() + ADDED_CONSTANT;
             }
         }
 
@@ -380,19 +338,87 @@ impl State {
             }
         }
 
-        // Store solution
-        for i in 0..m { self.max_player_strategy[i] = 0.0; }
-        for j in 0..n { self.min_player_strategy[j] = 0.0; }
-        self.expected_payoff = 1.0 / tableau[m][n] - ADDED_CONSTANT;
+        let mut max_player_strategy = [0.0; MAX_ACTIONS_PER_AGENT];
+        let mut min_player_strategy = [0.0; MAX_ACTIONS_PER_AGENT];
         for j in 0..n {
             if top_labels[j] > 0 { // If it's one of row player's labels
-                self.max_player_strategy[top_labels[j] as usize - 1] = tableau[m][j] / tableau[m][n];
+                max_player_strategy[top_labels[j] as usize - 1] = tableau[m][j] / tableau[m][n];
             }
         }
         for i in 0..m {
             if left_labels[i] < 0 { // If it's one of column player's labels
-                self.min_player_strategy[(-left_labels[i]) as usize - 1] = tableau[i][n] / tableau[m][n];
+                min_player_strategy[(-left_labels[i]) as usize - 1] = tableau[i][n] / tableau[m][n];
             }
         }
+
+        let mut max_player_strategy_vec = max_player_strategy.to_vec();
+        let mut min_player_strategy_vec = min_player_strategy.to_vec();
+        max_player_strategy_vec.truncate(m);
+        min_player_strategy_vec.truncate(n);
+        ZeroSumNashEq {
+            max_player_strategy: max_player_strategy_vec,
+            min_player_strategy: min_player_strategy_vec,
+            expected_payoff: 1.0 / tableau[m][n] - ADDED_CONSTANT
+        }
     }
+
+    /// Copies only the game state into a new State instance; doesn't copy the child matrix or display text.
+    fn copy_game_state(&self) -> State {
+        State {
+            pokemon_by_id: self.pokemon_by_id.clone(),
+            min_pokemon_id: self.min_pokemon_id,
+            max_pokemon_id: self.max_pokemon_id,
+            weather: self.weather,
+            terrain: self.terrain,
+            turn_number: self.turn_number,
+            display_text: vec![],
+            child_matrix: vec![]
+        }
+    }
+
+    pub fn pokemon_by_id(&self, id: u8) -> &Pokemon {
+        &self.pokemon_by_id[id as usize]
+    }
+
+    pub fn pokemon_by_id_mut(&mut self, id: u8) -> &mut Pokemon {
+        &mut self.pokemon_by_id[id as usize]
+    }
+
+    pub fn battle_end_check(&self) -> bool {
+        self.pokemon_by_id[0..5].iter().all(|pokemon| pokemon.current_hp == 0) || self.pokemon_by_id[6..11].iter().all(|pokemon| pokemon.current_hp == 0)
+    }
+}
+
+struct Matrix {
+    elements: Vec<Vec<f64>>,
+    num_rows: usize,
+    num_cols: usize
+}
+
+impl Matrix {
+    const fn from(elements: Vec<Vec<f64>>) -> Matrix {
+        let num_rows = elements.len();
+        if num_rows == 0 { panic!("Matrix must not be empty."); }
+        let num_cols = elements.get(0).unwrap().len();
+        if num_cols == 0 { panic!("Matrix must not be empty.") }
+
+        Matrix {
+            elements,
+            num_rows,
+            num_cols
+        }
+    }
+
+    const fn get(&self, row: usize, col: usize) -> Option<f64> {
+        if let Some(inner_vec) = self.elements.get(row) {
+            return inner_vec.get(col).copied()
+        }
+        None
+    }
+}
+
+struct ZeroSumNashEq {
+    max_player_strategy: Vec<f64>, // The maximizing player's strategy at equilibrium
+    min_player_strategy: Vec<f64>, // The minimizing player's strategy at equilibrium
+    expected_payoff: f64, // The expected payoff for the maximizing player at equilibrium
 }
