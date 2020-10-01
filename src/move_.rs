@@ -112,7 +112,7 @@ impl MoveAction {
         state.pokemon_by_id_mut(self.user_id).increment_msa_counter(state);
     }
 
-    pub fn perform(&self, state: &mut State, move_action_queue: &Vec<MoveAction>) -> bool {
+    pub fn perform(&self, state: &mut State, move_action_queue: &Vec<&MoveAction>) -> bool {
         let user = state.pokemon_by_id_mut(self.user_id);
 
         state.display_text.push(format!("{} used {} on:", user, self.move_.name));
@@ -159,7 +159,7 @@ pub struct Move {
     pub max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&State, &Vec<MoveAction>, &Pokemon, &Pokemon) -> bool
+    effect: fn(&State, &Vec<&MoveAction>, &Pokemon, &Pokemon) -> bool
 }
 
 impl Debug for Move {
