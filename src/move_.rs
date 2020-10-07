@@ -1,8 +1,9 @@
-use crate::{Ability, clamp, FieldPosition, game_version, MajorStatusAilment, Pokemon, StatIndex, Type};
-use crate::state::State;
+use crate::{FieldPosition, StatIndex, pokemon, MajorStatusAilment, Type, game_version, clamp, Ability};
+use crate::state::{State, StateSpace};
 use rand::Rng;
-use std::cmp::{max, min};
 use std::fmt::{Debug, Formatter, Error};
+use std::cmp::{min, max};
+use crate::pokemon::Pokemon;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MoveCategory {
@@ -62,7 +63,7 @@ impl MoveTargeting {
 /// A move selection that will be queued and executed during a turn.
 #[derive(Clone, Debug)]
 pub struct MoveAction {
-    pub user_id: u8,
+    user_id: u8,
     move_: &'static Move,
     move_index: Option<usize>,
     pub target_positions: Vec<FieldPosition>
@@ -74,19 +75,21 @@ impl MoveAction {
      * @param otherAction - some other move action
      * @return Whether this move action should come before {@code otherAction} based on priority and the user's speed.
      */
-    pub fn outspeeds(&self, state: &State, other_action: &MoveAction) -> bool {
+    pub fn outspeeds(&self, state_space: &StateSpace, state_id: usize, other_action: &MoveAction) -> bool {
         // TODO: Use seeded RNG
         if self.move_.priority_stage == other_action.move_.priority_stage {
-            let this_spd = state.pokemon_by_id(self.user_id).calculated_stat(state, StatIndex::Spd);
-            let other_spd = state.pokemon_by_id(other_action.user_id).calculated_stat(state, StatIndex::Spd);
+            let this_spd = pokemon::calculated_stat(state_space, state_id, self.user_id, StatIndex::Spd);
+            let other_spd = pokemon::calculated_stat(state_space, state_id, other_action.user_id, StatIndex::Spd);
             if this_spd == other_spd { rand::thread_rng().gen_bool(0.5) } else { this_spd > other_spd }
         } else {
             self.move_.priority_stage > other_action.move_.priority_stage
         }
     }
 
-    pub fn can_be_performed(&self, state: &mut State) -> bool {
+    pub fn can_be_performed(&self, state_space: &mut StateSpace, state_id: usize) -> bool {
+        let state = state_space.get_mut(state_id);
         let user = state.pokemon_by_id(self.user_id);
+
         if user.major_status_ailment() == MajorStatusAilment::Asleep {
             state.display_text.push(format!("{} is fast asleep.", user));
             return false;
@@ -102,35 +105,43 @@ impl MoveAction {
         }
         if user.current_hp == 0 || user.field_position == None { return false; }
         match self.move_index {
-            Some(move_index) => user.move_pp[move_index] > 0 && !user.move_disabled[move_index],
+            Some(move_index) => {
+                let move_instance = user.known_moves.get(move_index).unwrap();
+                move_instance.pp > 0 && !move_instance.disabled
+            },
             None => true
         }
     }
 
     /// Called just before can_be_performed is evaluated.
-    pub fn pre_move_stuff(&self, state: &mut State) {
-        state.pokemon_by_id_mut(self.user_id).increment_msa_counter(state);
+    pub fn pre_move_stuff(&self, state_space: &mut StateSpace, state_id: usize) {
+        pokemon::increment_msa_counter(state_space, state_id, self.user_id);
     }
 
-    pub fn perform(&self, state: &mut State, move_action_queue: &Vec<&MoveAction>) -> bool {
+    pub fn perform(&self, state_space: &mut StateSpace, state_id: usize, move_action_queue: &Vec<&MoveAction>) -> bool {
+        let state = state_space.get_mut(state_id);
         let user = state.pokemon_by_id_mut(self.user_id);
 
-        state.display_text.push(format!("{} used {} on:", user, self.move_.name));
         if let Some(move_index) = self.move_index {
-            user.move_pp[move_index] -= 1;
+            user.known_moves.get_mut(move_index).unwrap().pp -= 1;
         }
 
-        for target_pos in self.target_positions {
-            let target = if target_pos == FieldPosition::Min {
-                state.min_pokemon_id.map(|min_pokemon_id| state.pokemon_by_id_mut(min_pokemon_id))
+        let display_text = format!("{} used {} on:", user, self.move_.name);
+        state.display_text.push(display_text);
+
+        for target_pos in &self.target_positions {
+            let target_id = if *target_pos == FieldPosition::Min {
+                state.min_pokemon_id
             } else {
-                state.max_pokemon_id.map(|max_pokemon_id| state.pokemon_by_id_mut(max_pokemon_id))
+                state.max_pokemon_id
             };
 
-            match target {
-                Some(target) => {
-                    state.display_text.push(format!("- {}", target));
-                    if (self.move_.effect)(state, move_action_queue, user, target) { return true; }
+            match target_id {
+                Some(target_id) => {
+                    state.display_text.push(format!("- {}", state.pokemon_by_id(target_id)));
+                    if (self.move_.effect)(state_space, state_id, move_action_queue, self.user_id, target_id) {
+                        return true;
+                    }
                 },
                 None => {
                     state.display_text.push(String::from("- None"));
@@ -159,7 +170,7 @@ pub struct Move {
     pub max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&State, &Vec<&MoveAction>, &Pokemon, &Pokemon) -> bool
+    effect: fn(&mut StateSpace, usize, &Vec<&MoveAction>, u8, u8) -> bool
 }
 
 impl Debug for Move {
@@ -186,7 +197,7 @@ impl Default for Move {
             max_pp: 1,
             priority_stage: 0,
             sound_based: false,
-            effect: |state, move_action_queue, pokemon, target| false
+            effect: |state_space, state_id, move_action_queue, user_id, target_id| false
         }
     }
 }
@@ -201,7 +212,7 @@ macro_rules! compose {
     ($head:expr, $($tail:expr), +) => { |x| compose!($($tail), +)($head(x)) }
 }
 
-fn critical_hit_chance(critical_hit_stage_bonus: usize) -> f64 {
+const fn critical_hit_chance(critical_hit_stage_bonus: usize) -> f64 {
     let mut c: usize = 0;
     c += critical_hit_stage_bonus;
     c = min(c, 4);
@@ -214,11 +225,11 @@ fn critical_hit_chance(critical_hit_stage_bonus: usize) -> f64 {
     }
 }
 
-fn main_stat_stage_multiplier(stat_stage: i8) -> f64 {
+const fn main_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(2, 2 + stat_stage) as f64 / max(2, 2 - stat_stage) as f64
 }
 
-fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
+const fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(3, 3 + stat_stage) as f64 / max(3, 3 - stat_stage) as f64
 }
 
@@ -233,7 +244,11 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
     (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
-fn struggle(state: &mut State, move_queue: Vec<MoveAction>, user: &mut Pokemon, target: &mut Pokemon) -> bool {
+fn struggle(state_space: &mut StateSpace, state_id: usize, move_queue: &Vec<&MoveAction>, user_id: u8, target_id: u8) -> bool {
+    let state = state_space.get_mut(state_id);
+    let user = state.pokemon_by_id(user_id);
+    let target = state.pokemon_by_id(target_id);
+
     let accuracy_check = game_version().gen() >= 4 || std_accuracy_check(user, target, 100);
     if !accuracy_check {
         state.display_text.push(format!("{} avoided the attack!", target.species.name));
@@ -253,8 +268,8 @@ fn struggle(state: &mut State, move_queue: Vec<MoveAction>, user: &mut Pokemon, 
 
     let offensive_stat_stage = user.stat_stage(offensive_stat_index);
     let defensive_stat_stage = target.stat_stage(defensive_stat_index);
-    let mut calculated_atk = user.calculated_stat(state, offensive_stat_index);
-    let calculated_def = target.calculated_stat(state, defensive_stat_index);
+    let mut calculated_atk = pokemon::calculated_stat(state_space, state_id, user_id, offensive_stat_index);
+    let calculated_def = pokemon::calculated_stat(state_space, state_id, target_id, defensive_stat_index);
 
     if user.ability == Ability::Overgrow && user.current_hp < user.max_hp / 3 && Type::Normal == Type::Grass { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
 
@@ -287,7 +302,7 @@ fn struggle(state: &mut State, move_queue: Vec<MoveAction>, user: &mut Pokemon, 
     modified_damage = modified_damage.max(1.0);
 
     let damage_dealt = modified_damage.round() as i16;
-    if target.apply_damage(state, damage_dealt) { return true; }
+    if pokemon::apply_damage(state_space, state_id, target_id, damage_dealt) { return true; }
 
     let recoil_damage = if game_version().gen() <= 3 {
         max(damage_dealt / 4, 1) as i16
@@ -298,7 +313,8 @@ fn struggle(state: &mut State, move_queue: Vec<MoveAction>, user: &mut Pokemon, 
     };
     if recoil_damage > 0 {
         state.display_text.push(format!("{} took recoil damage!", user));
-        return user.apply_damage(state, recoil_damage);
+        return pokemon::apply_damage(state_space, state_id, user_id, recoil_damage);
     }
+
     false
 }
