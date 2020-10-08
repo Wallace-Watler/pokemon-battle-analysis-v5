@@ -17,8 +17,8 @@ fn main() {
     let bulbasaur_config = PokemonConfig::new();
     let test_pokemon = [bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon()];
 
-    let test_state = State {
-        pokemon: test_pokemon,
+    let test_state = || State {
+        pokemon: test_pokemon.clone(),
         min_pokemon_id: None,
         max_pokemon_id: None,
         weather: Default::default(),
@@ -27,6 +27,10 @@ fn main() {
         display_text: vec![]
     };
 
-    let battle_value = state::run_battle(test_state, true);
-    println!("Battle value: {}", battle_value);
+    for _ in 0..10 {
+        state::run_battle(test_state(), false);
+    }
+
+    println!("\n----Profile---");
+    coarse_prof::write(&mut std::io::stdout()).unwrap();
 }

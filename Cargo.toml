@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 almost = "0.2.0"
+coarse-prof = "0.2.4"
 lazy_static = "1.4.0"
 rand = "0.7.3"
 strum = "0.19.2"

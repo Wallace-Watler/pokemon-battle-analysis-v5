@@ -4,6 +4,7 @@ use rand::Rng;
 use std::fmt::{Debug, Formatter, Error};
 use std::cmp::{min, max};
 use crate::pokemon::Pokemon;
+use coarse_prof::profile;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MoveCategory {
@@ -127,6 +128,8 @@ impl MoveAction {
     }
 
     pub fn perform(&self, state_space: &mut StateSpace, state_id: usize, move_action_queue: &[&MoveAction]) -> bool {
+        profile!("perform");
+
         if let Some(move_index) = self.move_index {
             state_space.get_mut(state_id).unwrap().pokemon_by_id_mut(self.user_id).known_moves.get_mut(move_index).unwrap().pp -= 1;
         }
@@ -314,6 +317,7 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
 }
 
 fn growl(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    profile!("effect");
     let accuracy_check;
     let target_name;
     {
@@ -334,6 +338,7 @@ fn growl(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveActio
 }
 
 fn leech_seed(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    profile!("effect");
     let accuracy_check;
     let target_name;
     let target_is_grass_type;
@@ -367,6 +372,7 @@ fn leech_seed(state_space: &mut StateSpace, state_id: usize, move_queue: &[&Move
 }
 
 fn struggle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    profile!("effect");
     let accuracy_check;
     let target_name;
     let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
@@ -438,6 +444,7 @@ fn struggle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAc
 }
 
 fn tackle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    profile!("effect");
     let accuracy_check;
     let target_name;
     let target_first_type;
@@ -516,6 +523,7 @@ fn tackle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveActi
 }
 
 fn vine_whip(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    profile!("effect");
     let accuracy_check;
     let target_name;
     let target_first_type;
