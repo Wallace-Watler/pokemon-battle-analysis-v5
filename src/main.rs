@@ -1,13 +1,12 @@
 extern crate strum;
 extern crate strum_macros;
 
-use crate::{move_::{MoveCategory, MoveAction}, species::Species, state::State};
+use crate::{move_::MoveCategory, state::State};
 use rand::Rng;
 use std::{env, intrinsics::transmute};
 use std::cmp::max;
-use std::fmt::{Display, Debug, Error, Formatter};
-use crate::move_::Move;
-use std::cell::RefCell;
+use std::fmt::Debug;
+use crate::pokemon::Pokemon;
 
 mod move_;
 mod pokemon;
@@ -18,17 +17,32 @@ static mut GAME_VERSION: GameVersion = GameVersion::SS;
 fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    println!("Args: {:?}", args);
+    //let args: Vec<String> = env::args().collect();
 
     // TODO: Parse game version from args
     unsafe {
         GAME_VERSION = GameVersion::XY;
     }
+
+    let test_bulbasaur = Pokemon::new(unsafe { &species::BULBASAUR }, Gender::Male, Nature::Adamant, Ability::Overgrow, [31; 6], [42; 6], vec![]);
+    let test_pokemon = [test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur];
+
+    let test_state = State {
+        pokemon: test_pokemon,
+        min_pokemon_id: None,
+        max_pokemon_id: None,
+        weather: Default::default(),
+        terrain: Default::default(),
+        turn_number: 0,
+        display_text: vec![]
+    };
+
+    let battle_value = state::run_battle(test_state);
+    println!("Battle value: {}", battle_value);
 }
 
 fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
-    if !(min <= max) { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
+    if min > max { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
     if i < min { min } else if i > max { max } else { i }
 }
 
@@ -44,11 +58,11 @@ fn choose_weighted_index(weights: &[f64]) -> usize {
         if d < w { return i; }
         d -= w;
     }
-    return weights.len() - 1;
+    weights.len() - 1
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum FieldPosition {
+pub enum FieldPosition {
     Min,
     Max
 }
@@ -79,7 +93,7 @@ impl FieldPosition {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(usize)]
-enum Type {
+pub enum Type {
     None = 0,
     Normal = 1,
     Fighting = 2,
@@ -145,7 +159,7 @@ impl Default for Type {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum Terrain {
+pub enum Terrain {
     Normal,
     Electric,
     Grassy,
@@ -158,7 +172,7 @@ impl Default for Terrain {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum Weather {
+pub enum Weather {
     None,
     Sunshine,
     HarshSunshine,
@@ -175,7 +189,7 @@ impl Default for Weather {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum Ability {
+pub enum Ability {
     None,
     Chlorophyll,
     Overgrow
@@ -243,7 +257,7 @@ impl Default for GameVersion {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum Gender {
+pub enum Gender {
     None,
     Male,
     Female
@@ -260,7 +274,7 @@ impl Gender {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-enum MajorStatusAilment {
+pub enum MajorStatusAilment {
     Okay,
     Asleep,
     Poisoned,
@@ -271,7 +285,7 @@ enum MajorStatusAilment {
 }
 
 impl MajorStatusAilment {
-    const fn display_text_when_cured(&self) -> &str {
+    const fn display_text_when_cured(&self) -> &'static str {
         match self {
             MajorStatusAilment::Okay => "",
             MajorStatusAilment::Asleep => " woke up!",
@@ -289,7 +303,7 @@ impl Default for MajorStatusAilment {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
-enum Nature {
+pub enum Nature {
     Adamant = 0,
     Bashful = 1,
     Bold = 2,
@@ -359,7 +373,7 @@ impl Nature {
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[repr(usize)]
-enum StatIndex {
+pub enum StatIndex {
     Hp = 0,
     Atk = 1,
     Def = 2,
@@ -386,7 +400,7 @@ impl StatIndex {
 
     fn as_usize(&self) -> usize {
         unsafe {
-            transmute(self)
+            transmute(*self)
         }
     }
 }

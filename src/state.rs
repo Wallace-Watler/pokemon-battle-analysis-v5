@@ -1,13 +1,14 @@
-use crate::{Weather, Terrain, FieldPosition, pokemon, MajorStatusAilment};
+use crate::{Weather, Terrain, FieldPosition, pokemon, MajorStatusAilment, choose_weighted_index};
 use std::f64::NAN;
 use rand::Rng;
 use std::cmp::max;
 use crate::pokemon::Pokemon;
-use crate::move_::{MoveAction, Move};
+use crate::move_::MoveAction;
 
-const AI_LEVEL: u8 = 3;
-const MAX_ACTIONS_PER_AGENT: usize = 9;
+const AI_LEVEL: u8 = 1;
+const MAX_ACTIONS_PER_AGENT: usize = 10;
 
+#[derive(Debug)]
 struct ZeroSumNashEq {
     max_player_strategy: [f64; MAX_ACTIONS_PER_AGENT], // The maximizing player's strategy at equilibrium
     min_player_strategy: [f64; MAX_ACTIONS_PER_AGENT], // The minimizing player's strategy at equilibrium
@@ -22,7 +23,7 @@ pub struct StateSpace {
 }
 
 impl StateSpace {
-    const fn new(root: State, branching_factor: usize, num_levels: u32) -> StateSpace {
+    fn new(root: State, branching_factor: usize, num_levels: u32) -> StateSpace {
         if num_levels == 0 { panic!(format!("Number of levels must be at least 1. Given: {}", num_levels)); }
 
         let mut states = vec![Some(root)];
@@ -34,16 +35,16 @@ impl StateSpace {
         }
     }
 
-    pub const fn get(&self, state_id: usize) -> &State {
-        self.states.get(state_id).unwrap().as_ref().unwrap()
+    pub fn get(&self, state_id: usize) -> Option<&State> {
+        self.states.get(state_id).unwrap().as_ref()
     }
 
-    pub const fn get_mut(&mut self, state_id: usize) -> &mut State {
-        self.states.get_mut(state_id).unwrap().as_mut().unwrap()
+    pub fn get_mut(&mut self, state_id: usize) -> Option<&mut State> {
+        self.states.get_mut(state_id).unwrap().as_mut()
     }
 
     /// Indices of the direct children of the state at `parent_index`.
-    const fn child_indices(&self, parent_index: usize) -> Vec<usize> {
+    fn child_indices(&self, parent_index: usize) -> Vec<usize> {
         let child_size = (self.depth_and_subtree_size(parent_index).1 - 1) / self.branching_factor;
 
         if child_size == 0 { return vec![]; }
@@ -52,8 +53,8 @@ impl StateSpace {
     }
 
     /// Whether the state at `parent_index` has children.
-    const fn has_children(&self, parent_index: usize) -> bool {
-        self.child_indices(parent_index).iter().any(|index| !self.states.get(*index).is_none())
+    fn has_children(&self, parent_index: usize) -> bool {
+        self.child_indices(parent_index).iter().any(|index| !self.states.get(*index).unwrap().is_none())
     }
 
     /// Replaces the entire tree with the subtree rooted at `index` and fills the gaps with None.
@@ -83,7 +84,7 @@ impl StateSpace {
     }
 
     /// The depth and size of a subtree rooted at `index`. The root is at depth 0.
-    const fn depth_and_subtree_size(&self, index: usize) -> (u32, usize) {
+    fn depth_and_subtree_size(&self, index: usize) -> (u32, usize) {
         self._depth_and_subtree_size(index, 0, self.states.len(), 0)
     }
 
@@ -107,12 +108,12 @@ impl StateSpace {
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
 pub struct State {
-    pokemon: [Pokemon; 12], // ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team
+    pub pokemon: [Pokemon; 12], // ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team
     pub min_pokemon_id: Option<u8>, // Pokemon of the minimizing team that is on the field
     pub max_pokemon_id: Option<u8>, // Pokemon of the maximizing team that is on the field
     pub weather: Weather,
-    terrain: Terrain,
-    turn_number: u32,
+    pub terrain: Terrain,
+    pub turn_number: u32,
     pub display_text: Vec<String> // Battle print-out that is shown when this state is entered; useful for sanity checks
 }
 
@@ -140,27 +141,37 @@ impl State {
             }
         }
 
-        for i in 0..m { tableau[i][n] = 1.0; }
+        for row in tableau.iter_mut().take(m) { row[n] = 1.0; }
         for j in 0..n { tableau[m][j] = -1.0; }
 
         // Row player's labels are positive
         let mut left_labels = [0; MAX_ACTIONS_PER_AGENT];
-        for i in 0..m { left_labels[i] = i as i64 + 1; }
+        for (i, label) in left_labels.iter_mut().enumerate().take(m) {
+            *label = i as i64 + 1;
+        }
 
         // Column player's labels are negative
         let mut top_labels = [0; MAX_ACTIONS_PER_AGENT];
-        for j in 0..n { top_labels[j] = -(j as i64 + 1); }
+        //for j in 0..n { top_labels[j] = -(j as i64 + 1); }
+        for (j, label) in top_labels.iter_mut().enumerate().take(n) {
+            *label = -(j as i64 + 1);
+        }
 
         let mut negative_remaining = true;
         while negative_remaining {
-            let mut q = 0; // Column to pivot on
-            for j in 1..n {
-                if tableau[m][j] < tableau[m][q] { q = j; }
+            let mut q = MAX_ACTIONS_PER_AGENT + 1; // Column to pivot on
+            for j in 0..n {
+                if !tableau.iter().map(|row| row[j]).collect::<Vec<f64>>()[0..m].iter().all(|f| f.is_nan()) { // If the column is not all NAN
+                    if q > MAX_ACTIONS_PER_AGENT || tableau[m][j] < tableau[m][q] { q = j; }
+                }
             }
-            let mut p = 0; // Row to pivot on
-            for possible_p in 1..m {
-                if tableau[possible_p][q] > 1e-12 && (tableau[possible_p][n] / tableau[possible_p][q] < tableau[p][n] / tableau[p][q] || tableau[p][q] <= 1e-12) {
-                    p = possible_p;
+            let mut p = MAX_ACTIONS_PER_AGENT + 1; // Row to pivot on
+            for possible_p in 0..m {
+                if !tableau[possible_p][0..n].iter().all(|f| f.is_nan()) { // If the row is not all NAN
+                    if p > MAX_ACTIONS_PER_AGENT
+                        || (tableau[possible_p][q] > 1e-12 && (tableau[possible_p][n] / tableau[possible_p][q] < tableau[p][n] / tableau[p][q] || tableau[p][q] <= 1e-12)) {
+                        p = possible_p;
+                    }
                 }
             }
 
@@ -174,8 +185,8 @@ impl State {
             for j in 0..(n + 1) {
                 if j != q { tableau[p][j] /= pivot; }
             }
-            for i in 0..(m + 1) {
-                if i != p { tableau[i][q] /= -pivot; }
+            for (i, row) in tableau.iter_mut().enumerate().take(m + 1) {
+                if i != p { row[q] /= -pivot; }
             }
             tableau[p][q] = 1.0 / pivot;
 
@@ -251,54 +262,58 @@ impl State {
  * @return A heuristic value between -1.0 and 1.0 signifying how well the maximizer did; 0.0 would be a tie. The
  * minimizer's value is just its negation.
  */
-fn run_battle(state: State) -> f64 {
+pub fn run_battle(state: State) -> f64 {
     println!("<<<< BATTLE BEGIN >>>>");
+    state.print_display_text();
 
     let mut state_space: StateSpace = StateSpace::new(state, MAX_ACTIONS_PER_AGENT.pow(2), AI_LEVEL as u32 + 1);
-    let root_state = state_space.get(0);
+    let state_space_size = state_space.states.len();
+    generate_child_states(&mut state_space, 0, state_space_size);
 
-    root_state.print_display_text();
-    generate_child_states(&mut state_space, 0, state_space.states.len());
-    /*while !state.child_matrix.is_empty() {
-        let nash_eq = state.heuristic_value();
-        state = state.child_matrix
-            .get_mut(choose_weighted_index(&nash_eq.max_player_strategy)).unwrap()
-            .remove(choose_weighted_index(&nash_eq.min_player_strategy));
-        state.print_display_text();
-        state.generate_child_states(AI_LEVEL);
-    }*/
+    while state_space.has_children(0) {
+        let nash_eq = heuristic_value(&state_space, 0, state_space_size);
+        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy);
+        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy);
+        let child_num = maximizer_choice * MAX_ACTIONS_PER_AGENT + minimizer_choice;
+        let child_index = child_num * (state_space_size - 1) / state_space.branching_factor + 1;
+        state_space.prune_expand(child_index);
+        state_space.get(0).unwrap().print_display_text();
+        generate_child_states(&mut state_space, 0, state_space_size);
+    }
 
     println!("<<<< BATTLE END >>>>");
-    heuristic_value(&state_space, 0, state_space.states.len()).expected_payoff
+    heuristic_value(&state_space, 0, state_space_size).expected_payoff
 }
 
 /// Generates new child states to fill the state space.
 fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_size: usize) {
-    if state_space.has_children(parent_id) { return; } // Don't need to recompute children if they already exist
+    // Don't need to compute children if they already exist or if at maximum depth
+    if state_space.depth_and_subtree_size(parent_id).1 == 1 || state_space.has_children(parent_id) {
+        return;
+    }
 
     let child_size = (parent_size - 1) / state_space.branching_factor;
 
-    let parent = state_space.get_mut(parent_id);
-    match parent.min_pokemon_id.zip(parent.max_pokemon_id) {
+    match state_space.get(parent_id).unwrap().min_pokemon_id.zip(state_space.get(parent_id).unwrap().max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
-            match parent.min_pokemon_id.xor(parent.max_pokemon_id) {
+            match state_space.get(parent_id).unwrap().min_pokemon_id.xor(state_space.get(parent_id).unwrap().max_pokemon_id) {
                 Some(id) => {
                     if id >= 6 { // Only minimizer must choose
-                        let choices: Vec<u8> = (0..6).filter(|id| parent.pokemon_by_id(*id).current_hp > 0).collect();
+                        let choices: Vec<u8> = (0..6).filter(|id| state_space.get(parent_id).unwrap().pokemon_by_id(*id).current_hp > 0).collect();
                         for choice in choices {
                             let child_index = choice as usize * child_size + parent_id + 1;
                             if state_space.states.remove(child_index).is_some() { panic!("Removed an existing child") };
-                            state_space.states.insert(child_index, Some(parent.copy_game_state()));
+                            state_space.states.insert(child_index, Some(state_space.get(parent_id).unwrap().copy_game_state()));
 
                             pokemon::add_to_field(state_space, child_index, choice, FieldPosition::Min);
                             generate_child_states(state_space, child_index, child_size);
                         }
                     } else { // Only maximizer must choose
-                        let choices: Vec<u8> = (6..12).filter(|id| parent.pokemon_by_id(*id).current_hp > 0).collect();
+                        let choices: Vec<u8> = (6..12).filter(|id| state_space.get(parent_id).unwrap().pokemon_by_id(*id).current_hp > 0).collect();
                         for choice in choices {
                             let child_index = (choice as usize - 6) * MAX_ACTIONS_PER_AGENT * child_size + parent_id + 1;
                             if state_space.states.remove(child_index).is_some() { panic!("Removed an existing child") };
-                            state_space.states.insert(child_index, Some(parent.copy_game_state()));
+                            state_space.states.insert(child_index, Some(state_space.get(parent_id).unwrap().copy_game_state()));
 
                             pokemon::add_to_field(state_space, child_index, choice, FieldPosition::Max);
                             generate_child_states(state_space, child_index, child_size);
@@ -306,17 +321,17 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
                     }
                 },
                 None => { // Both agents must choose
-                    let minimizer_choices: Vec<u8> = (0..6).filter(|id| parent.pokemon_by_id(*id).current_hp > 0).collect();
-                    let maximizer_choices: Vec<u8> = (6..12).filter(|id| parent.pokemon_by_id(*id).current_hp > 0).collect();
+                    let minimizer_choices: Vec<u8> = (0..6).filter(|id| state_space.get(parent_id).unwrap().pokemon_by_id(*id).current_hp > 0).collect();
+                    let maximizer_choices: Vec<u8> = (6..12).filter(|id| state_space.get(parent_id).unwrap().pokemon_by_id(*id).current_hp > 0).collect();
 
                     for maximizer_choice in maximizer_choices {
-                        for minimizer_choice in minimizer_choices {
-                            let child_num = (maximizer_choice as usize - 6) * MAX_ACTIONS_PER_AGENT + minimizer_choice as usize;
+                        for minimizer_choice in &minimizer_choices {
+                            let child_num = (maximizer_choice as usize - 6) * MAX_ACTIONS_PER_AGENT + *minimizer_choice as usize;
                             let child_index = child_num * child_size + parent_id + 1;
                             if state_space.states.remove(child_index).is_some() { panic!("Removed an existing child") };
-                            state_space.states.insert(child_index, Some(parent.copy_game_state()));
+                            state_space.states.insert(child_index, Some(state_space.get(parent_id).unwrap().copy_game_state()));
 
-                            let battle_ended = pokemon::add_to_field(state_space, child_index, minimizer_choice, FieldPosition::Min);
+                            let battle_ended = pokemon::add_to_field(state_space, child_index, *minimizer_choice, FieldPosition::Min);
                             if !battle_ended {
                                 pokemon::add_to_field(state_space, child_index, maximizer_choice, FieldPosition::Max);
                             }
@@ -329,39 +344,43 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
         },
         Some((min_pokemon_id, max_pokemon_id)) => { // Agents must choose actions for each Pokemon
             // TODO: Rule out actions that are obviously not optimal to reduce search size
-            let generate_move_actions = |user_id: u8| -> Vec<MoveAction> {
-                let user = parent.pokemon_by_id_mut(user_id);
+            let mut generate_move_actions = |user_id: u8| -> Vec<MoveAction> {
                 let mut user_actions: Vec<MoveAction> = vec![];
 
-                if let Some(next_move_action) = user.next_move_action.clone() { // TODO: Is this actually what should happen?
+                if let Some(next_move_action) = state_space.get(parent_id).unwrap().pokemon_by_id(user_id).next_move_action.clone() { // TODO: Is this actually what should happen?
                     if next_move_action.can_be_performed(state_space, parent_id) {
                         user_actions.push(next_move_action);
-                        user.next_move_action = None;
+                        state_space.get_mut(parent_id).unwrap().pokemon_by_id_mut(user_id).next_move_action = None;
                         return user_actions;
                     } else {
-                        user.next_move_action = None;
+                        state_space.get_mut(parent_id).unwrap().pokemon_by_id_mut(user_id).next_move_action = None;
                     }
                 }
 
-                let mut add_move_action = |move_: &'static Move, move_index: Option<usize>| {
-                    user_actions.push(MoveAction {
-                        user_id,
-                        move_,
-                        move_index,
-                        target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                            .filter(|field_pos| move_.targeting.can_hit(user.field_position.unwrap(), *field_pos)).collect()
-                    });
-                };
-
+                let user = state_space.get(parent_id).unwrap().pokemon_by_id(user_id);
                 for move_index in 0..user.known_moves.len() {
                     if user.can_choose_move(Some(move_index)) {
-                        add_move_action(user.known_moves.get(move_index).unwrap().move_, Some(move_index));
+                        let move_ = user.known_moves.get(move_index).unwrap().move_;
+                        user_actions.push(MoveAction {
+                            user_id,
+                            move_,
+                            move_index: Some(move_index),
+                            target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                                .filter(|field_pos| move_.targeting.can_hit(user.field_position.unwrap(), *field_pos)).collect()
+                        });
                     }
                 }
 
                 // TODO: Can Struggle be used if switch actions are available?
                 if user_actions.is_empty() {
-                    add_move_action(unsafe { &crate::move_::STRUGGLE }, None);
+                    let move_ = unsafe { &crate::move_::STRUGGLE };
+                    user_actions.push(MoveAction {
+                        user_id,
+                        move_,
+                        move_index: None,
+                        target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                            .filter(|field_pos| move_.targeting.can_hit(user.field_position.unwrap(), *field_pos)).collect()
+                    });
                 }
 
                 // TODO: Exploring every switch action takes too long; maybe come up with some heuristic to decide when to switch?
@@ -376,15 +395,15 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
             };
 
             // TODO: Generate switch actions separately
-            let mut minimizer_move_actions: Vec<MoveAction> = generate_move_actions(min_pokemon_id);
-            let mut maximizer_move_actions: Vec<MoveAction> = generate_move_actions(max_pokemon_id);
+            let minimizer_move_actions: Vec<MoveAction> = generate_move_actions(min_pokemon_id);
+            let maximizer_move_actions: Vec<MoveAction> = generate_move_actions(max_pokemon_id);
 
             for maximizer_choice in 0..maximizer_move_actions.len() {
                 for minimizer_choice in 0..minimizer_move_actions.len() {
                     let child_num = (maximizer_choice as usize + 6) * MAX_ACTIONS_PER_AGENT + minimizer_choice as usize + 6;
                     let child_index = child_num * child_size + parent_id + 1;
                     if state_space.states.remove(child_index).is_some() { panic!("Removed an existing child") };
-                    state_space.states.insert(child_index, Some(parent.copy_game_state()));
+                    state_space.states.insert(child_index, Some(state_space.get(parent_id).unwrap().copy_game_state()));
 
                     play_out_turn(state_space, child_index, vec![minimizer_move_actions.get(minimizer_choice).unwrap(), maximizer_move_actions.get(maximizer_choice).unwrap()]);
                     generate_child_states(state_space, child_index, child_size);
@@ -397,36 +416,48 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
 /// Recursively computes the heuristic value of a state.
 fn heuristic_value(state_space: &StateSpace, parent_index: usize, parent_size: usize) -> ZeroSumNashEq {
     let parent = state_space.get(parent_index);
-    if !state_space.has_children(parent_index) {
-        ZeroSumNashEq {
-            max_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
-            min_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
-            expected_payoff: (parent.pokemon[6..12].iter().map(|pokemon: &Pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
-                - parent.pokemon[0..6].iter().map(|pokemon: &Pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0
-        }
-    } else {
-        let child_size = (parent_size - 1) / state_space.branching_factor;
-        let mut payoff_matrix = [[NAN; MAX_ACTIONS_PER_AGENT]; MAX_ACTIONS_PER_AGENT];
+    match parent {
+        Some(parent) => {
+            if !state_space.has_children(parent_index) {
+                ZeroSumNashEq {
+                    max_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
+                    min_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
+                    expected_payoff: (parent.pokemon[6..12].iter().map(|pokemon: &Pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
+                        - parent.pokemon[0..6].iter().map(|pokemon: &Pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0
+                }
+            } else {
+                let child_size = (parent_size - 1) / state_space.branching_factor;
+                let mut payoff_matrix = [[NAN; MAX_ACTIONS_PER_AGENT]; MAX_ACTIONS_PER_AGENT];
 
-        for maximizer_choice in 0..MAX_ACTIONS_PER_AGENT {
-            for minimizer_choice in 0..MAX_ACTIONS_PER_AGENT {
-                let child_num = maximizer_choice * MAX_ACTIONS_PER_AGENT + minimizer_choice;
-                let child_index = child_num * child_size + parent_index + 1;
-                payoff_matrix[maximizer_choice][minimizer_choice] = heuristic_value(state_space, child_index, child_size).expected_payoff;
+                for (maximizer_choice, row) in payoff_matrix.iter_mut().enumerate().take(MAX_ACTIONS_PER_AGENT) {
+                    for (minimizer_choice, entry) in row.iter_mut().enumerate().take(MAX_ACTIONS_PER_AGENT) {
+                        let child_num = maximizer_choice * MAX_ACTIONS_PER_AGENT + minimizer_choice;
+                        let child_index = child_num * child_size + parent_index + 1;
+                        *entry = heuristic_value(state_space, child_index, child_size).expected_payoff;
+                    }
+                }
+
+                State::calc_nash_eq(payoff_matrix)
+            }
+        },
+        None => {
+            ZeroSumNashEq {
+                max_player_strategy: [NAN; MAX_ACTIONS_PER_AGENT],
+                min_player_strategy: [NAN; MAX_ACTIONS_PER_AGENT],
+                expected_payoff: NAN
             }
         }
-
-        State::calc_nash_eq(payoff_matrix)
     }
 }
 
 // TODO: Pass actions directly without using queues
 fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_queue: Vec<&MoveAction>) {
-    let state = state_space.get_mut(state_id);
-    state.display_text.push(format!("---- Turn {} ----", state.turn_number));
+    let turn_number = state_space.get(state_id).unwrap().turn_number;
+    state_space.get_mut(state_id).unwrap().display_text.push(format!("---- Turn {} ----", turn_number));
 
     if move_action_queue.len() == 2 && move_action_queue.get(1).unwrap().outspeeds(state_space, state_id, move_action_queue.get(0).unwrap()) {
-        move_action_queue.push(move_action_queue.remove(0));
+        let first_move_action = move_action_queue.remove(0);
+        move_action_queue.push(first_move_action);
     } else if move_action_queue.len() > 2 { panic!("'moveActionQueue' size is greater than 2."); }
 
     while !move_action_queue.is_empty() {
@@ -440,25 +471,25 @@ fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_
     // TODO: Use seeded RNG
     // End of turn effects (order is randomized to avoid bias)
     let pokemon_ids = if rand::thread_rng().gen_bool(0.5) {
-        vec![state.min_pokemon_id, state.max_pokemon_id]
+        vec![state_space.get(state_id).unwrap().min_pokemon_id, state_space.get(state_id).unwrap().max_pokemon_id]
     } else {
-        vec![state.max_pokemon_id, state.min_pokemon_id]
+        vec![state_space.get(state_id).unwrap().max_pokemon_id, state_space.get(state_id).unwrap().min_pokemon_id]
     };
 
     for pokemon_id in pokemon_ids {
         if let Some(pokemon_id) = pokemon_id {
-            let pokemon = state.pokemon_by_id(pokemon_id);
-
-            if pokemon.major_status_ailment() == MajorStatusAilment::Poisoned {
-                state.display_text.push(format!("{} takes damage from poison!", pokemon));
-                if pokemon::apply_damage(state_space, state_id, pokemon_id, max(pokemon.max_hp / 8, 1) as i16) {
+            if state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id).major_status_ailment() == MajorStatusAilment::Poisoned {
+                let display_text = format!("{} takes damage from poison!", state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id));
+                state_space.get_mut(state_id).unwrap().display_text.push(display_text);
+                if pokemon::apply_damage(state_space, state_id, pokemon_id, max(state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id).max_hp / 8, 1) as i16) {
                     return;
                 }
             }
 
-            if let Some(seeder_id) = pokemon.seeded_by {
-                state.display_text.push(format!("{}'s seed drains energy from {}!", state.pokemon_by_id(seeder_id), pokemon));
-                let transferred_hp = max(pokemon.max_hp / 8, 1) as i16;
+            if let Some(seeder_id) = state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id).seeded_by {
+                let display_text = format!("{}'s seed drains energy from {}!", state_space.get(state_id).unwrap().pokemon_by_id(seeder_id), state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id));
+                state_space.get_mut(state_id).unwrap().display_text.push(display_text);
+                let transferred_hp = max(state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id).max_hp / 8, 1) as i16;
                 if pokemon::apply_damage(state_space, state_id, pokemon_id, transferred_hp) {
                     return;
                 }
@@ -467,6 +498,5 @@ fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_
         }
     }
 
-    state.display_text.push(String::from(""));
-    state.turn_number += 1;
+    state_space.get_mut(state_id).unwrap().turn_number += 1;
 }

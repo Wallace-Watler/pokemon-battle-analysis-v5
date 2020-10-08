@@ -45,7 +45,19 @@ impl Species {
 }
 
 static mut SPECIES: Vec<&Species> = vec![];
-static mut BULBASAUR: Species = Default::default();
+pub static mut BULBASAUR: Species = Species {
+    allow_duplicates: true,
+    name: "Bulbasaur",
+    first_type: Type::Grass,
+    second_type: Type::Poison,
+    first_ability: Ability::Overgrow,
+    second_ability: Ability::None,
+    base_stats: [45, 49, 49, 65, 65, 45],
+    weight: 69,
+    male_chance: 875,
+    female_chance: 125,
+    move_pool: vec![/*TACKLE, GROWL, LEECH_SEED, VINE_WHIP, POISON_POWDER, SLEEP_POWDER, RAZOR_LEAF, SWEET_SCENT, GROWTH, SYNTHESIS, SOLAR_BEAM, TOXIC, BULLET_SEED, HIDDEN_POWER, SUNNY_DAY, PROTECT, GIGA_DRAIN, FRUSTRATION, RETURN, DOUBLE_TEAM, SLUDGE_BOMB, FACADE, SECRET_POWER, REST, ATTRACT, CUT, STRENGTH, FLASH, ROCK_SMASH, CHARM, CURSE, GRASS_WHISTLE, LIGHT_SCREEN, MAGICAL_LEAF, PETAL_DANCE, SAFEGUARD, SKULL_BASH, BODY_SLAM, DOUBLE-EDGE, MIMIC, SUBSTITUTE, SWORDS_DANCE*/]
+};
 
 unsafe fn initialize_species() {
     BULBASAUR = match game_version() {
