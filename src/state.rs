@@ -5,7 +5,7 @@ use std::cmp::max;
 use crate::pokemon::Pokemon;
 use crate::move_::MoveAction;
 
-const AI_LEVEL: u8 = 1;
+const AI_LEVEL: u8 = 2;
 const MAX_ACTIONS_PER_AGENT: usize = 10;
 
 #[derive(Debug)]
@@ -93,13 +93,11 @@ impl StateSpace {
 
         let child_size = (subtree_size - 1) / self.branching_factor;
 
-        for child_num in 0..self.branching_factor {
-            let child_subtree_start = child_num * child_size + 1;
-            if index < child_subtree_start + child_size {
-                return self._depth_and_subtree_size(index, child_subtree_start, child_size, depth + 1);
-            }
-        }
-        panic!("This should never happen.");
+        let child_subtree_start = (0..self.branching_factor)
+            .map(|child_num| child_num * child_size + 1 + subtree_start)
+            .find(|child_subtree_start| index < child_subtree_start + child_size).expect("This should never happen.");
+
+        self._depth_and_subtree_size(index, child_subtree_start, child_size, depth + 1)
     }
 }
 
@@ -401,12 +399,12 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
             for maximizer_choice in 0..maximizer_move_actions.len() {
                 for minimizer_choice in 0..minimizer_move_actions.len() {
                     let child_num = (maximizer_choice as usize + 6) * MAX_ACTIONS_PER_AGENT + minimizer_choice as usize + 6;
-                    let child_index = child_num * child_size + parent_id + 1;
-                    if state_space.states.remove(child_index).is_some() { panic!("Removed an existing child") };
-                    state_space.states.insert(child_index, Some(state_space.get(parent_id).unwrap().copy_game_state()));
+                    let child_id = child_num * child_size + parent_id + 1;
+                    if state_space.states.remove(child_id).is_some() { panic!("Removed an existing child") };
+                    state_space.states.insert(child_id, Some(state_space.get(parent_id).unwrap().copy_game_state()));
 
-                    play_out_turn(state_space, child_index, vec![minimizer_move_actions.get(minimizer_choice).unwrap(), maximizer_move_actions.get(maximizer_choice).unwrap()]);
-                    generate_child_states(state_space, child_index, child_size);
+                    play_out_turn(state_space, child_id, vec![minimizer_move_actions.get(minimizer_choice).unwrap(), maximizer_move_actions.get(maximizer_choice).unwrap()]);
+                    generate_child_states(state_space, child_id, child_size);
                 }
             }
         }
