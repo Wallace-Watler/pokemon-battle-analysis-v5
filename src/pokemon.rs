@@ -43,7 +43,7 @@ pub struct Pokemon {
 }
 
 impl Pokemon {
-    pub fn new(species: &'static Species, gender: Gender, nature: Nature, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: Vec<&'static Move>) -> Pokemon {
+    pub fn new(species: &'static Species, gender: Gender, nature: Nature, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static Move]) -> Pokemon {
         let max_hp = (2 * species.base_stat(StatIndex::Hp) + ivs[StatIndex::Hp.as_usize()] + evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
         Pokemon {
             species,

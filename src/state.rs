@@ -18,8 +18,7 @@ struct ZeroSumNashEq {
 /// A full (also complete and balanced) n-ary tree in prefix order.
 pub struct StateSpace {
     states: Vec<Option<State>>,
-    branching_factor: usize,
-    num_levels: u32
+    branching_factor: usize
 }
 
 impl StateSpace {
@@ -30,8 +29,7 @@ impl StateSpace {
         states.resize_with((0..num_levels).map(|depth| branching_factor.pow(depth)).sum(), || None);
         StateSpace {
             states,
-            branching_factor,
-            num_levels
+            branching_factor
         }
     }
 

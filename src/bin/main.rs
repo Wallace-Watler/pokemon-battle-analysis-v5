@@ -1,6 +1,7 @@
-use pokemon_battle_analysis_v5::{Gender, Nature, Ability, GameVersion, species, state};
-use pokemon_battle_analysis_v5::pokemon::Pokemon;
+use pokemon_battle_analysis_v5::{GameVersion, state};
 use pokemon_battle_analysis_v5::state::State;
+use pokemon_battle_analysis_v5::setup::PokemonConfig;
+use pokemon_battle_analysis_v5::species;
 
 fn main() {
     //let args: Vec<String> = env::args().collect();
@@ -8,10 +9,11 @@ fn main() {
     // TODO: Parse game version from args
     unsafe {
         pokemon_battle_analysis_v5::GAME_VERSION = GameVersion::XY;
+        species::initialize_species();
     }
 
-    let test_bulbasaur = Pokemon::new(unsafe { &species::BULBASAUR }, Gender::Male, Nature::Adamant, Ability::Overgrow, [31; 6], [42; 6], vec![]);
-    let test_pokemon = [test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur];
+    let bulbasaur_config = PokemonConfig::new();
+    let test_pokemon = [bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon()];
 
     let test_state = State {
         pokemon: test_pokemon,

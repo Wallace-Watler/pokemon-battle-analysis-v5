@@ -10,6 +10,7 @@ use crate::pokemon::Pokemon;
 
 mod move_;
 pub mod pokemon;
+pub mod setup;
 pub mod species;
 pub mod state;
 
@@ -307,7 +308,7 @@ pub enum Nature {
 }
 
 impl Nature {
-    fn random_nature() -> Nature {
+    pub fn random_nature() -> Nature {
         unsafe {
             // TODO: Use seeded RNG
             transmute(rand::thread_rng().gen_range::<u8, u8, u8>(0, 25))
