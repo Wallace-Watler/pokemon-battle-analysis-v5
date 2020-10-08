@@ -2,6 +2,7 @@ use pokemon_battle_analysis_v5::{GameVersion, state};
 use pokemon_battle_analysis_v5::state::State;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
 use pokemon_battle_analysis_v5::species;
+use pokemon_battle_analysis_v5::move_;
 
 fn main() {
     //let args: Vec<String> = env::args().collect();
@@ -9,6 +10,7 @@ fn main() {
     // TODO: Parse game version from args
     unsafe {
         pokemon_battle_analysis_v5::GAME_VERSION = GameVersion::XY;
+        move_::initialize_moves();
         species::initialize_species();
     }
 
@@ -25,6 +27,6 @@ fn main() {
         display_text: vec![]
     };
 
-    let battle_value = state::run_battle(test_state);
+    let battle_value = state::run_battle(test_state, true);
     println!("Battle value: {}", battle_value);
 }

@@ -1,14 +1,13 @@
 extern crate strum;
 extern crate strum_macros;
 
-use crate::{move_::MoveCategory, state::State};
+use crate::move_::MoveCategory;
 use rand::Rng;
-use std::{env, intrinsics::transmute};
+use std::intrinsics::transmute;
 use std::cmp::max;
 use std::fmt::Debug;
-use crate::pokemon::Pokemon;
 
-mod move_;
+pub mod move_;
 pub mod pokemon;
 pub mod setup;
 pub mod species;

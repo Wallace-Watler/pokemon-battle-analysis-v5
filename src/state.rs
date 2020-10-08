@@ -260,9 +260,11 @@ impl State {
  * @return A heuristic value between -1.0 and 1.0 signifying how well the maximizer did; 0.0 would be a tie. The
  * minimizer's value is just its negation.
  */
-pub fn run_battle(state: State) -> f64 {
-    println!("<<<< BATTLE BEGIN >>>>");
-    state.print_display_text();
+pub fn run_battle(state: State, print_battle: bool) -> f64 {
+    if print_battle {
+        println!("<<<< BATTLE BEGIN >>>>");
+        state.print_display_text();
+    }
 
     let mut state_space: StateSpace = StateSpace::new(state, MAX_ACTIONS_PER_AGENT.pow(2), AI_LEVEL as u32 + 1);
     let state_space_size = state_space.states.len();
@@ -275,11 +277,11 @@ pub fn run_battle(state: State) -> f64 {
         let child_num = maximizer_choice * MAX_ACTIONS_PER_AGENT + minimizer_choice;
         let child_index = child_num * (state_space_size - 1) / state_space.branching_factor + 1;
         state_space.prune_expand(child_index);
-        state_space.get(0).unwrap().print_display_text();
+        if print_battle { state_space.get(0).unwrap().print_display_text(); }
         generate_child_states(&mut state_space, 0, state_space_size);
     }
 
-    println!("<<<< BATTLE END >>>>");
+    if print_battle { println!("<<<< BATTLE END >>>>"); }
     heuristic_value(&state_space, 0, state_space_size).expected_payoff
 }
 

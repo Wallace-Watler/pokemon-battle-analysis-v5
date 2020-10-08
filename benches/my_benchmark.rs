@@ -1,12 +1,12 @@
-use criterion::{Criterion, BenchmarkId, criterion_group, criterion_main};
-use pokemon_battle_analysis_v5::{Gender, Nature, Ability, GameVersion, species, state};
-use pokemon_battle_analysis_v5::pokemon::Pokemon;
+use criterion::{Criterion, criterion_group, criterion_main};
+use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
 use pokemon_battle_analysis_v5::state::State;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
 
 fn ai_benchmark(c: &mut Criterion) {
     unsafe {
         pokemon_battle_analysis_v5::GAME_VERSION = GameVersion::XY;
+        move_::initialize_moves();
         species::initialize_species();
     }
 
@@ -24,7 +24,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state())));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state(), false)));
 }
 
 criterion_group!(benches, ai_benchmark);

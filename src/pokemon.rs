@@ -218,7 +218,7 @@ fn remove_from_field(state_space: &mut StateSpace, state_id: usize, pokemon_id: 
     }
 }
 
-fn increment_stat_stage(state_space: &mut StateSpace, state_id: usize, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
+pub fn increment_stat_stage(state_space: &mut StateSpace, state_id: usize, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
     let state = state_space.get_mut(state_id).unwrap();
     let pokemon_species_name;
     let old_stat_stage;
@@ -232,20 +232,14 @@ fn increment_stat_stage(state_space: &mut StateSpace, state_id: usize, pokemon_i
     }
 
     let actual_change = new_stat_stage - old_stat_stage;
-    if actual_change <= -3 {
-        state.display_text.push(format!("{}'s {} severely fell!", pokemon_species_name, stat_index.name()));
-    } else if actual_change == -2 {
-        state.display_text.push(format!("{}'s {} harshly fell!", pokemon_species_name, stat_index.name()));
-    } else if actual_change == -1 {
-        state.display_text.push(format!("{}'s {} fell!", pokemon_species_name, stat_index.name()));
-    } else if actual_change == 0 {
-        state.display_text.push(format!("{}'s {} won't go any {}!", pokemon_species_name, stat_index.name(), if requested_amount < 0 { "lower" } else { "higher" }));
-    } else if actual_change == 1 {
-        state.display_text.push(format!("{}'s {} rose!", pokemon_species_name, stat_index.name()));
-    } else if actual_change == 2 {
-        state.display_text.push(format!("{}'s {} rose sharply!", pokemon_species_name, stat_index.name()));
-    } else {
-        state.display_text.push(format!("{}'s {} rose drastically!", pokemon_species_name, stat_index.name()));
+    match actual_change {
+        c if c <= -3 => state.display_text.push(format!("{}'s {} severely fell!", pokemon_species_name, stat_index.name())),
+        -2 => state.display_text.push(format!("{}'s {} harshly fell!", pokemon_species_name, stat_index.name())),
+        -1 => state.display_text.push(format!("{}'s {} fell!", pokemon_species_name, stat_index.name())),
+        0 => state.display_text.push(format!("{}'s {} won't go any {}!", pokemon_species_name, stat_index.name(), if requested_amount < 0 { "lower" } else { "higher" })),
+        1 => state.display_text.push(format!("{}'s {} rose!", pokemon_species_name, stat_index.name())),
+        2 => state.display_text.push(format!("{}'s {} rose sharply!", pokemon_species_name, stat_index.name())),
+        _ => state.display_text.push(format!("{}'s {} rose drastically!", pokemon_species_name, stat_index.name()))
     }
 }
 

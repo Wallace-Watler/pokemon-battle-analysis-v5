@@ -3,7 +3,7 @@ use crate::state::StateSpace;
 use rand::Rng;
 use std::fmt::{Debug, Formatter, Error};
 use std::cmp::{min, max};
-use crate::pokemon::{Pokemon, calculated_stat};
+use crate::pokemon::Pokemon;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MoveCategory {
@@ -199,6 +199,28 @@ impl PartialEq for Move {
     }
 }
 
+pub static mut GROWL: Move = Move {
+    name: "Growl",
+    type_: Type::Normal,
+    category: MoveCategory::Status,
+    targeting: MoveTargeting::AllAdjacentOpponents,
+    max_pp: 40,
+    priority_stage: 0,
+    sound_based: true,
+    effect: growl
+};
+
+pub static mut LEECH_SEED: Move = Move {
+    name: "Leech Seed",
+    type_: Type::Grass,
+    category: MoveCategory::Status,
+    targeting: MoveTargeting::SingleAdjacentOpponent,
+    max_pp: 10,
+    priority_stage: 0,
+    sound_based: false,
+    effect: leech_seed
+};
+
 pub static mut STRUGGLE: Move = Move {
     name: "Struggle",
     type_: Type::None,
@@ -220,6 +242,36 @@ pub static mut TACKLE: Move = Move {
     sound_based: false,
     effect: tackle
 };
+
+pub static mut VINE_WHIP: Move = Move {
+    name: "Vine Whip",
+    type_: Type::Grass,
+    category: MoveCategory::Physical,
+    targeting: MoveTargeting::SingleAdjacentOpponent,
+    max_pp: 10,
+    priority_stage: 0,
+    sound_based: false,
+    effect: vine_whip
+};
+
+/// # Safety
+/// Should be called after the game version has been set from the program input and before the species are initialized.
+pub unsafe fn initialize_moves() {
+    VINE_WHIP = Move {
+        name: "Vine Whip",
+        type_: Type::Grass,
+        category: MoveCategory::Physical,
+        targeting: MoveTargeting::SingleAdjacentOpponent,
+        max_pp: match game_version().gen() {
+            1..=3 => 10,
+            4..=5 => 15,
+            _ => 25
+        },
+        priority_stage: 0,
+        sound_based: false,
+        effect: vine_whip
+    };
+}
 
 // ---- MOVE FUNCTIONS ---- //
 
@@ -259,6 +311,59 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
     let attack_multiplier = if critical_hit && offensive_stat_stage < 0 { 1.0 } else { main_stat_stage_multiplier(offensive_stat_stage) };
     let defense_multiplier = if critical_hit && defensive_stat_stage > 0 { 1.0 } else { main_stat_stage_multiplier(defensive_stat_stage) };
     (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
+}
+
+fn growl(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    let accuracy_check;
+    let target_name;
+    {
+        let state = state_space.get(state_id).unwrap();
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
+        accuracy_check = std_accuracy_check(user, target, 100);
+        target_name = target.species.name;
+    }
+
+    if !accuracy_check {
+        state_space.get_mut(state_id).unwrap().display_text.push(format!("{} avoided the attack!", target_name));
+        return false;
+    }
+
+    pokemon::increment_stat_stage(state_space, state_id, target_id, StatIndex::Atk, -1);
+    false
+}
+
+fn leech_seed(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    let accuracy_check;
+    let target_name;
+    let target_is_grass_type;
+    {
+        let state = state_space.get(state_id).unwrap();
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
+        accuracy_check = std_accuracy_check(user, target, 90);
+        target_name = target.species.name;
+        target_is_grass_type = target.is_type(Type::Grass);
+    }
+
+    if !accuracy_check {
+        state_space.get_mut(state_id).unwrap().display_text.push(format!("{} avoided the attack!", target_name));
+        return false;
+    }
+
+    let state_mut = state_space.get_mut(state_id).unwrap();
+    match state_mut.pokemon_by_id(target_id).seeded_by {
+        Some(_) => state_mut.display_text.push(format!("{} is already seeded!", target_name)),
+        None => {
+            if target_is_grass_type {
+                state_mut.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+            } else {
+                state_mut.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
+                state_mut.display_text.push(format!("A seed was planted on {}!", target_name));
+            }
+        }
+    }
+    false
 }
 
 fn struggle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
@@ -368,8 +473,8 @@ fn tackle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveActi
         return false;
     }
 
-    let calculated_atk = calculated_stat(state_space, state_id, user_id, offensive_stat_index);
-    let calculated_def = calculated_stat(state_space, state_id, target_id, defensive_stat_index);
+    let calculated_atk = pokemon::calculated_stat(state_space, state_id, user_id, offensive_stat_index);
+    let calculated_def = pokemon::calculated_stat(state_space, state_id, target_id, defensive_stat_index);
 
     /*
      Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
@@ -389,6 +494,85 @@ fn tackle(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveActi
         5..=6 => 50,
         _ => 40
     };
+    let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
+        state_space.get_mut(state_id).unwrap().display_text.push(String::from("It's a critical hit!"));
+        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
+    } else {
+        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
+    };
+
+    modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
+    if damage_type != Type::None && state_space.get(state_id).unwrap().pokemon_by_id(user_id).is_type(damage_type) { modified_damage *= 1.5; }
+    modified_damage *= type_effectiveness;
+    if type_effectiveness < 0.9 {
+        state_space.get_mut(state_id).unwrap().display_text.push(String::from("It's not very effective..."));
+    } else if type_effectiveness > 1.1 {
+        state_space.get_mut(state_id).unwrap().display_text.push(String::from("It's super effective!"));
+    }
+    if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
+    modified_damage = modified_damage.max(1.0);
+
+    pokemon::apply_damage(state_space, state_id, target_id, modified_damage.round() as i16)
+}
+
+fn vine_whip(state_space: &mut StateSpace, state_id: usize, move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+    let accuracy_check;
+    let target_name;
+    let target_first_type;
+    let target_second_type;
+    let category = if game_version().gen() <= 3 { Type::Grass.category() } else { MoveCategory::Physical };
+    let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
+    let defensive_stat_index = if category == MoveCategory::Physical { StatIndex::Def } else { StatIndex::SpDef };
+    let offensive_stat_stage;
+    let defensive_stat_stage;
+    let user_major_status_ailment;
+    {
+        let state = state_space.get(state_id).unwrap();
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
+        accuracy_check = std_accuracy_check(user, target, 100);
+        target_name = target.species.name;
+        target_first_type = target.first_type;
+        target_second_type = target.second_type;
+        offensive_stat_stage = user.stat_stage(offensive_stat_index);
+        defensive_stat_stage = target.stat_stage(defensive_stat_index);
+        user_major_status_ailment = user.major_status_ailment();
+    }
+
+    if !accuracy_check {
+        state_space.get_mut(state_id).unwrap().display_text.push(format!("{} avoided the attack!", target_name));
+        return false;
+    }
+
+    let damage_type = Type::Grass;
+    let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
+    if almost::zero(type_effectiveness) {
+        state_space.get_mut(state_id).unwrap().display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+        return false;
+    }
+
+    let mut calculated_atk = pokemon::calculated_stat(state_space, state_id, user_id, offensive_stat_index);
+    let calculated_def = pokemon::calculated_stat(state_space, state_id, target_id, defensive_stat_index);
+
+    {
+        let user = state_space.get(state_id).unwrap().pokemon_by_id(user_id);
+        if user.ability == Ability::Overgrow && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
+    }
+
+    /*
+     Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
+     - Multi-target modifier (?)
+     - Weather modifier (TODO)
+     - If critical hit, multiply by 1.5 (by 2 prior to 6th gen)
+     - Random integer between 85 and 100 divided by 100
+     - STAB
+     - Type effectiveness
+     - Halve damage if user is burned
+     - damage = max(damage, 1)
+     */
+
+    // TODO: Use seeded RNG
+    let move_power = if game_version().gen() <= 5 { 35 } else { 45 };
     let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
         state_space.get_mut(state_id).unwrap().display_text.push(String::from("It's a critical hit!"));
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
