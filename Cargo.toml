@@ -1,5 +1,5 @@
 [package]
-name = "pokemon-battle-analysis-v4"
+name = "pokemon_battle_analysis_v5"
 version = "0.1.0"
 authors = ["Wallace Watler <watlerkw@msoe.edu>"]
 edition = "2018"
@@ -12,3 +12,10 @@ lazy_static = "1.4.0"
 rand = "0.7.3"
 strum = "0.19.2"
 strum_macros = "0.19.2"
+
+[dev-dependencies]
+criterion = "0.3.3"
+
+[[bench]]
+name = "my_benchmark"
+harness = false

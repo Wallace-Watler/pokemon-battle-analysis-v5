@@ -9,37 +9,12 @@ use std::fmt::Debug;
 use crate::pokemon::Pokemon;
 
 mod move_;
-mod pokemon;
-mod species;
-mod state;
+pub mod pokemon;
+pub mod species;
+pub mod state;
 
-static mut GAME_VERSION: GameVersion = GameVersion::SS;
+pub static mut GAME_VERSION: GameVersion = GameVersion::SS;
 fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
-
-fn main() {
-    //let args: Vec<String> = env::args().collect();
-
-    // TODO: Parse game version from args
-    unsafe {
-        GAME_VERSION = GameVersion::XY;
-    }
-
-    let test_bulbasaur = Pokemon::new(unsafe { &species::BULBASAUR }, Gender::Male, Nature::Adamant, Ability::Overgrow, [31; 6], [42; 6], vec![]);
-    let test_pokemon = [test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur.clone(), test_bulbasaur];
-
-    let test_state = State {
-        pokemon: test_pokemon,
-        min_pokemon_id: None,
-        max_pokemon_id: None,
-        weather: Default::default(),
-        terrain: Default::default(),
-        turn_number: 0,
-        display_text: vec![]
-    };
-
-    let battle_value = state::run_battle(test_state);
-    println!("Battle value: {}", battle_value);
-}
 
 fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
     if min > max { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
@@ -200,7 +175,7 @@ impl Default for Ability {
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
-enum GameVersion {
+pub enum GameVersion {
     RS,
     E,
     FRLG,
