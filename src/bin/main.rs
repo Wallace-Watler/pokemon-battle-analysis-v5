@@ -27,9 +27,7 @@ fn main() {
         display_text: vec![]
     };
 
-    for _ in 0..10 {
-        state::run_battle(test_state(), false);
-    }
+    state::run_battle(test_state(), true);
 
     println!("\n----Profile---");
     coarse_prof::write(&mut std::io::stdout()).unwrap();

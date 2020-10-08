@@ -6,7 +6,7 @@ use crate::pokemon::Pokemon;
 use crate::move_::MoveAction;
 use coarse_prof::profile;
 
-const AI_LEVEL: u8 = 1;
+const AI_LEVEL: u8 = 2;
 const MAX_ACTIONS_PER_AGENT: usize = 10;
 
 #[derive(Debug)]
@@ -60,27 +60,29 @@ impl StateSpace {
 
     /// Replaces the entire tree with the subtree rooted at `index` and fills the gaps with None.
     fn prune_expand(&mut self, index: usize) {
-        let (pruned_subtree_depth, pruned_subtree_size) = self.depth_and_subtree_size(index);
+        profile!("_expand");
+
+        let (_, pruned_subtree_size) = self.depth_and_subtree_size(index);
         self.states.truncate(index + pruned_subtree_size);
         for _ in 0..index { self.states.remove(0); }
 
-        self._expand(0, self.states.len(), pruned_subtree_depth);
+        self._expand(0, self.states.len());
     }
 
-    fn _expand(&mut self, subtree_start: usize, subtree_size: usize, num_levels_to_add: u32) {
-        profile!("_expand");
-        if num_levels_to_add > 0 {
-            if subtree_size == 1 {
-                for _ in 0..self.branching_factor {
-                    self.states.insert(subtree_start + 1, None);
-                    self._expand(subtree_start + 1, 1, num_levels_to_add - 1);
-                }
-            } else {
-                let child_size = (subtree_size - 1) / self.branching_factor;
-                for child_num in (0..self.branching_factor).rev() {
-                    let child_subtree_start = child_num * child_size + 1;
-                    self._expand(child_subtree_start, child_size, num_levels_to_add);
-                }
+    #[inline(always)]
+    fn _expand(&mut self, subtree_start: usize, subtree_size: usize) {
+        self.states.reserve(self.branching_factor);
+
+        if subtree_size == 1 {
+            for _ in 0..self.branching_factor {
+                self.states.insert(subtree_start + 1, None);
+                //self._expand(subtree_start + 1, 1);
+            }
+        } else {
+            let child_size = (subtree_size - 1) / self.branching_factor;
+            for child_num in (0..self.branching_factor).rev() {
+                let child_subtree_start = child_num * child_size + 1;
+                self._expand(child_subtree_start, child_size);
             }
         }
     }
@@ -473,10 +475,12 @@ fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_
     let turn_number = state_space.get(state_id).unwrap().turn_number;
     state_space.get_mut(state_id).unwrap().display_text.push(format!("---- Turn {} ----", turn_number));
 
-    if move_action_queue.len() == 2 && move_action_queue.get(1).unwrap().outspeeds(state_space, state_id, move_action_queue.get(0).unwrap()) {
-        let first_move_action = move_action_queue.remove(0);
-        move_action_queue.push(first_move_action);
-    } else if move_action_queue.len() > 2 { panic!("'moveActionQueue' size is greater than 2."); }
+    unsafe {
+        if move_action_queue.len() == 2 && move_action_queue.get_unchecked(1).outspeeds(state_space, state_id, move_action_queue.get_unchecked(0)) {
+            let first_move_action = move_action_queue.remove(0);
+            move_action_queue.push(first_move_action);
+        } else if move_action_queue.len() > 2 { panic!("'moveActionQueue' size is greater than 2."); }
+    }
 
     while !move_action_queue.is_empty() {
         let move_action = move_action_queue.remove(0);
