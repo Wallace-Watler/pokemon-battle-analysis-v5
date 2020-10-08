@@ -8,11 +8,13 @@ edition = "2018"
 
 [dependencies]
 almost = "0.2.0"
-coarse-prof = "0.2.4"
 lazy_static = "1.4.0"
 rand = "0.7.3"
 strum = "0.19.2"
 strum_macros = "0.19.2"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+jemallocator = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.3.3"
@@ -20,3 +22,11 @@ criterion = "0.3.3"
 [[bench]]
 name = "my_benchmark"
 harness = false
+
+[profile.release]
+debug-assertions = false
+debug = false
+codegen-units = 1
+lto = "fat"
+overflow-checks = false
+panic = "abort"

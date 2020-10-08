@@ -4,7 +4,6 @@ use rand::Rng;
 use std::cmp::max;
 use crate::pokemon::Pokemon;
 use crate::move_::MoveAction;
-use coarse_prof::profile;
 
 const AI_LEVEL: u8 = 2;
 const MAX_ACTIONS_PER_AGENT: usize = 10;
@@ -35,12 +34,10 @@ impl StateSpace {
     }
 
     pub fn get(&self, state_id: usize) -> Option<&State> {
-        profile!("get");
         self.states.get(state_id).unwrap().as_ref()
     }
 
     pub fn get_mut(&mut self, state_id: usize) -> Option<&mut State> {
-        profile!("get_mut");
         self.states.get_mut(state_id).unwrap().as_mut()
     }
 
@@ -60,8 +57,6 @@ impl StateSpace {
 
     /// Replaces the entire tree with the subtree rooted at `index` and fills the gaps with None.
     fn prune_expand(&mut self, index: usize) {
-        profile!("_expand");
-
         let (_, pruned_subtree_size) = self.depth_and_subtree_size(index);
         self.states.truncate(index + pruned_subtree_size);
         for _ in 0..index { self.states.remove(0); }
@@ -69,9 +64,10 @@ impl StateSpace {
         self._expand(0, self.states.len());
     }
 
-    #[inline(always)]
     fn _expand(&mut self, subtree_start: usize, subtree_size: usize) {
         self.states.reserve(self.branching_factor);
+
+
 
         if subtree_size == 1 {
             for _ in 0..self.branching_factor {
@@ -93,7 +89,7 @@ impl StateSpace {
     }
 
     fn _depth_and_subtree_size(&self, index: usize, subtree_start: usize, subtree_size: usize, depth: u32) -> (u32, usize) {
-        profile!("_depth_and_subtree_size");
+        
 
         if index == subtree_start {
             return (depth, subtree_size);
@@ -132,7 +128,7 @@ impl State {
     /// in use should contain NAN.
     /// Algorithm follows https://www.math.ucla.edu/~tom/Game_Theory/mat.pdf, section 4.5.
     fn calc_nash_eq(payoff_matrix: [[f64; MAX_ACTIONS_PER_AGENT]; MAX_ACTIONS_PER_AGENT]) -> ZeroSumNashEq {
-        profile!("calc_nash_eq");
+        
 
         // Algorithm requires that all elements be positive, so ADDED_CONSTANT is added to ensure this.
         const ADDED_CONSTANT: f64 = 2.0;
@@ -232,7 +228,7 @@ impl State {
 
     /// Copies only the game state into a new State instance; doesn't copy the child matrix or display text.
     fn copy_game_state(&self) -> State {
-        profile!("copy_game_state");
+        
 
         State {
             pokemon: self.pokemon.clone(),
@@ -246,12 +242,12 @@ impl State {
     }
 
     pub fn pokemon_by_id(&self, id: u8) -> &Pokemon {
-        profile!("pokemon_by_id");
+        
         &self.pokemon[id as usize]
     }
 
     pub fn pokemon_by_id_mut(&mut self, id: u8) -> &mut Pokemon {
-        profile!("pokemon_by_id_mut");
+        
         &mut self.pokemon[id as usize]
     }
 
@@ -273,7 +269,7 @@ impl State {
  * minimizer's value is just its negation.
  */
 pub fn run_battle(state: State, print_battle: bool) -> f64 {
-    profile!("run_battle");
+    
 
     if print_battle {
         println!("<<<< BATTLE BEGIN >>>>");
@@ -301,7 +297,7 @@ pub fn run_battle(state: State, print_battle: bool) -> f64 {
 
 /// Generates new child states to fill the state space.
 fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_size: usize) {
-    profile!("generate_child_states");
+    
 
     // Don't need to compute children if they already exist or if at maximum depth
     if state_space.depth_and_subtree_size(parent_id).1 == 1 || state_space.has_children(parent_id) {
@@ -431,7 +427,7 @@ fn generate_child_states(state_space: &mut StateSpace, parent_id: usize, parent_
 
 /// Recursively computes the heuristic value of a state.
 fn heuristic_value(state_space: &StateSpace, parent_index: usize, parent_size: usize) -> ZeroSumNashEq {
-    profile!("heuristic_value");
+    
 
     let parent = state_space.get(parent_index);
     match parent {
@@ -470,7 +466,7 @@ fn heuristic_value(state_space: &StateSpace, parent_index: usize, parent_size: u
 
 // TODO: Pass actions directly without using queues
 fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_queue: Vec<&MoveAction>) {
-    profile!("play_out_turn");
+    
 
     let turn_number = state_space.get(state_id).unwrap().turn_number;
     state_space.get_mut(state_id).unwrap().display_text.push(format!("---- Turn {} ----", turn_number));
@@ -499,7 +495,7 @@ fn play_out_turn(state_space: &mut StateSpace, state_id: usize, mut move_action_
     };
 
     for pokemon_id in pokemon_ids {
-        profile!("End of turn effects");
+        
         if let Some(pokemon_id) = pokemon_id {
             if state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id).major_status_ailment() == MajorStatusAilment::Poisoned {
                 let display_text = format!("{} takes damage from poison!", state_space.get(state_id).unwrap().pokemon_by_id(pokemon_id));

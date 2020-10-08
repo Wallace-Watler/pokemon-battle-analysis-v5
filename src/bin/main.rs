@@ -4,6 +4,13 @@ use pokemon_battle_analysis_v5::setup::PokemonConfig;
 use pokemon_battle_analysis_v5::species;
 use pokemon_battle_analysis_v5::move_;
 
+#[cfg(not(target_env = "msvc"))]
+use jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 fn main() {
     //let args: Vec<String> = env::args().collect();
 
@@ -28,7 +35,4 @@ fn main() {
     };
 
     state::run_battle(test_state(), true);
-
-    println!("\n----Profile---");
-    coarse_prof::write(&mut std::io::stdout()).unwrap();
 }
