@@ -1,11 +1,11 @@
-use pokemon_battle_analysis_v5::{GameVersion, state};
-use pokemon_battle_analysis_v5::state::{State, StateV2};
-use pokemon_battle_analysis_v5::setup::{PokemonConfig, PokemonConfigV2};
-use pokemon_battle_analysis_v5::species;
-use pokemon_battle_analysis_v5::move_;
-
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
+
+use pokemon_battle_analysis_v5::{GameVersion, state};
+use pokemon_battle_analysis_v5::move_;
+use pokemon_battle_analysis_v5::setup::PokemonConfigV2;
+use pokemon_battle_analysis_v5::species;
+use pokemon_battle_analysis_v5::state::StateV2;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -34,7 +34,7 @@ fn main() {
         display_text: vec![],
         children: vec![],
         num_maximizer_actions: 0,
-        num_minimizer_actions: 0
+        num_minimizer_actions: 0,
     };
 
     state::run_battle_v2(test_state(), true);
