@@ -23,14 +23,14 @@ pub struct PokemonV2 {
 
     // Major status ailment
     major_status_ailment: MajorStatusAilment,
-    msa_counter: u32,
-    msa_counter_target: Option<u32>,
-    snore_sleep_talk_counter: u32, // Only used in gen 3; otherwise it's always 0
+    msa_counter: u16,
+    msa_counter_target: Option<u16>,
+    snore_sleep_talk_counter: u8, // Only used in gen 3; otherwise it's always 0
 
     // Minor status ailments
-    confusion_turn_inflicted: Option<u32>,
+    confusion_turn_inflicted: Option<u16>,
     // Turn on which confusion was inflicted
-    confusion_turn_will_cure: Option<u32>,
+    confusion_turn_will_cure: Option<u16>,
     // Turn on which confusion will be cured naturally
     is_flinching: bool,
     pub seeded_by: Option<u8>,
@@ -127,7 +127,7 @@ impl MoveInstanceV2 {
 }
 
 pub fn calculated_stat_v2(state_box: &Box<StateV2>, pokemon_id: u8, stat_index: StatIndex) -> u32 {
-    let pokemon = state_box.pokemon_by_id(pokemon_id);
+    let pokemon = &state_box.pokemon[pokemon_id as usize];
 
     if stat_index == StatIndex::Hp { return pokemon.max_hp as u32; }
 
@@ -160,7 +160,9 @@ pub fn add_to_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, field_posit
             match state_box.min_pokemon_id {
                 None => { state_box.min_pokemon_id = Some(pokemon_id); }
                 Some(min_pokemon_id) => {
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state_box.pokemon_by_id(min_pokemon_id)));
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}",
+                                   pokemon_display_text, field_position, &state_box.pokemon[min_pokemon_id as
+                            usize]));
                 }
             }
         }
@@ -168,7 +170,9 @@ pub fn add_to_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, field_posit
             match state_box.max_pokemon_id {
                 None => { state_box.max_pokemon_id = Some(pokemon_id); }
                 Some(max_pokemon_id) => {
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state_box.pokemon_by_id(max_pokemon_id)));
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}",
+                                   pokemon_display_text, field_position, state_box
+                                       .pokemon[max_pokemon_id as usize]));
                 }
             }
         }
@@ -255,7 +259,7 @@ pub fn increment_msa_counter_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
 
         if let Some(msa_counter_target) = pokemon.msa_counter_target {
             if pokemon.major_status_ailment != MajorStatusAilment::Okay {
-                pokemon.msa_counter += pokemon.snore_sleep_talk_counter + 1;
+                pokemon.msa_counter += pokemon.snore_sleep_talk_counter as u16 + 1;
                 pokemon.snore_sleep_talk_counter = 0;
                 if pokemon.msa_counter >= msa_counter_target {
                     msa_cured = true;
@@ -271,10 +275,10 @@ pub fn increment_msa_counter_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
 
 /// The amount can be negative to add HP.
 pub fn apply_damage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, amount: i16) -> bool {
-    let new_hp = state_box.pokemon_by_id(pokemon_id).current_hp as i16 - amount;
+    let new_hp = state_box.pokemon[pokemon_id as usize].current_hp as i16 - amount;
     if new_hp <= 0 {
         state_box.pokemon_by_id_mut(pokemon_id).current_hp = 0;
-        let display_text = format!("{} fainted!", state_box.pokemon_by_id(pokemon_id));
+        let display_text = format!("{} fainted!", &state_box.pokemon[pokemon_id as usize]);
         state_box.display_text.push(display_text);
         remove_from_field_v2(state_box, pokemon_id);
         return state_box.battle_end_check();

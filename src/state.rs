@@ -6,7 +6,7 @@ use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, T
 use crate::move_::MoveActionV2;
 use crate::pokemon::PokemonV2;
 
-const AI_LEVEL: u8 = 2;
+const AI_LEVEL: u8 = 4;
 const MAX_ACTIONS_PER_AGENT: usize = 9;
 
 #[derive(Debug)]
@@ -21,7 +21,7 @@ struct ZeroSumNashEq {
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
 pub struct StateV2 {
-    pub pokemon: [PokemonV2; 12],
+    pub pokemon: [Box<PokemonV2>; 12],
     // ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team
     pub min_pokemon_id: Option<u8>,
     // Pokemon of the minimizing team that is on the field
@@ -29,7 +29,7 @@ pub struct StateV2 {
     // Pokemon of the maximizing team that is on the field
     pub weather: Weather,
     pub terrain: Terrain,
-    pub turn_number: u32,
+    pub turn_number: u16,
     pub display_text: Vec<String>,
     // Battle print-out that is shown when this state is entered; useful for sanity checks
     pub children: Vec<Box<StateV2>>,
@@ -46,17 +46,14 @@ impl StateV2 {
 
     /// Calculates the Nash equilibrium of a zero-sum payoff matrix.
     /// Algorithm follows https://www.math.ucla.edu/~tom/Game_Theory/mat.pdf, section 4.5.
-    fn calc_nash_eq(payoff_matrix: Vec<Vec<f64>>) -> ZeroSumNashEq {
+    fn calc_nash_eq(payoff_matrix: Vec<f64>, m: usize, n: usize) -> ZeroSumNashEq {
         // Algorithm requires that all elements be positive, so ADDED_CONSTANT is added to ensure this.
         const ADDED_CONSTANT: f64 = 2.0;
-
-        let m = payoff_matrix.len();
-        let n = payoff_matrix.get(0).unwrap().len();
 
         let mut tableau = [[0.0; MAX_ACTIONS_PER_AGENT + 1]; MAX_ACTIONS_PER_AGENT + 1];
         for i in 0..m {
             for j in 0..n {
-                tableau[i][j] = payoff_matrix[i][j] + ADDED_CONSTANT;
+                tableau[i][j] = payoff_matrix.get(i * n + j).unwrap() + ADDED_CONSTANT;
             }
         }
 
@@ -146,15 +143,11 @@ impl StateV2 {
             weather: self.weather,
             terrain: self.terrain,
             turn_number: self.turn_number,
-            display_text: vec![],
-            children: vec![],
+            display_text: Vec::new(),
+            children: Vec::new(),
             num_maximizer_actions: 0,
             num_minimizer_actions: 0,
         }
-    }
-
-    pub fn pokemon_by_id(&self, id: u8) -> &PokemonV2 {
-        &self.pokemon[id as usize]
     }
 
     pub fn pokemon_by_id_mut(&mut self, id: u8) -> &mut PokemonV2 {
@@ -213,7 +206,9 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
                 match state_box.min_pokemon_id.xor(state_box.max_pokemon_id) {
                     Some(id) => {
                         if id >= 6 { // Only minimizer must choose
-                            let choices: Vec<u8> = (0..6).filter(|id| state_box.pokemon_by_id(*id).current_hp > 0).collect();
+                            let choices: Vec<u8> = (0..6)
+                                .filter(|id| state_box.pokemon[*id as usize].current_hp > 0)
+                                .collect();
                             for choice in &choices {
                                 let mut child_box = Box::new(state_box.copy_game_state());
                                 pokemon::add_to_field_v2(&mut child_box, *choice, FieldPosition::Min);
@@ -222,7 +217,7 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
                             state_box.num_maximizer_actions = 1;
                             state_box.num_minimizer_actions = choices.len();
                         } else { // Only maximizer must choose
-                            let choices: Vec<u8> = (6..12).filter(|id| state_box.pokemon_by_id(*id).current_hp > 0).collect();
+                            let choices: Vec<u8> = (6..12).filter(|id| state_box.pokemon[*id as usize].current_hp > 0).collect();
                             for choice in &choices {
                                 let mut child_box = Box::new(state_box.copy_game_state());
                                 pokemon::add_to_field_v2(&mut child_box, *choice, FieldPosition::Max);
@@ -233,21 +228,37 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
                         }
                     }
                     None => { // Both agents must choose
-                        let minimizer_choices: Vec<u8> = (0..6).filter(|id| state_box.pokemon_by_id(*id).current_hp > 0).collect();
-                        let maximizer_choices: Vec<u8> = (6..12).filter(|id| state_box.pokemon_by_id(*id).current_hp > 0).collect();
+                        let minimizer_choices: Vec<_> = (0..6)
+                            .filter(|id| state_box.pokemon[*id as usize].current_hp > 0)
+                            .collect();
 
-                        for maximizer_choice in &maximizer_choices {
+                        let maximizer_choices: Vec<_> = (6..12)
+                            .filter(|id| state_box.pokemon[*id as usize].current_hp > 0)
+                            .collect();
+
+                        let (mut max_len, mut min_len) = (0, 0);
+
+                        let mut min_flag = true;
+
+                        for maximizer_choice in maximizer_choices {
                             for minimizer_choice in &minimizer_choices {
                                 let mut child_box = Box::new(state_box.copy_game_state());
-                                let battle_ended = pokemon::add_to_field_v2(&mut child_box, *minimizer_choice, FieldPosition::Min);
+                                let battle_ended = pokemon::add_to_field_v2(&mut child_box,
+                                                                            *minimizer_choice, FieldPosition::Min);
                                 if !battle_ended {
-                                    pokemon::add_to_field_v2(&mut child_box, *maximizer_choice, FieldPosition::Max);
+                                    pokemon::add_to_field_v2(&mut child_box, maximizer_choice, FieldPosition::Max);
                                 }
                                 state_box.children.push(child_box);
+
+                                min_len += min_flag as usize
                             }
+
+                            min_flag = false;
+
+                            max_len += 1
                         }
-                        state_box.num_maximizer_actions = maximizer_choices.len();
-                        state_box.num_minimizer_actions = minimizer_choices.len();
+                        state_box.num_maximizer_actions = max_len;
+                        state_box.num_minimizer_actions = min_len;
                     }
                 }
 
@@ -257,9 +268,9 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
             Some((min_pokemon_id, max_pokemon_id)) => { // Agents must choose actions for each Pokemon
                 // TODO: Rule out actions that are obviously not optimal to reduce search size
                 let mut generate_move_actions = |user_id: u8| -> Vec<MoveActionV2> {
-                    let mut user_actions: Vec<MoveActionV2> = vec![];
+                    let mut user_actions: Vec<MoveActionV2> = Vec::with_capacity(4);
 
-                    if let Some(next_move_action) = state_box.pokemon_by_id(user_id).next_move_action.clone() { // TODO: Is this actually what should happen?
+                    if let Some(next_move_action) = state_box.pokemon[user_id as usize].next_move_action.clone() { // TODO: Is this actually what should happen?
                         if next_move_action.can_be_performed(state_box) {
                             user_actions.push(next_move_action);
                             state_box.pokemon_by_id_mut(user_id).next_move_action = None;
@@ -269,7 +280,7 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
                         }
                     }
 
-                    let user = state_box.pokemon_by_id(user_id);
+                    let user = &state_box.pokemon[user_id as usize];
                     for move_index in 0..user.known_moves.len() {
                         if user.can_choose_move(Some(move_index)) {
                             let move_ = user.known_moves.get(move_index).unwrap().move_;
@@ -335,22 +346,15 @@ fn heuristic_value_v2(state_box: &Box<StateV2>) -> ZeroSumNashEq {
         ZeroSumNashEq {
             max_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
             min_player_strategy: [0.0; MAX_ACTIONS_PER_AGENT],
-            expected_payoff: (state_box.pokemon[6..12].iter().map(|pokemon: &PokemonV2| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
-                - state_box.pokemon[0..6].iter().map(|pokemon: &PokemonV2| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
+            expected_payoff: (state_box.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
+                - state_box.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
         }
     } else {
-        let mut payoff_matrix: Vec<Vec<f64>> = vec![];
+        let payoff_matrix = state_box.children.iter().map(|child_box| heuristic_value_v2
+            (child_box).expected_payoff).collect();
 
-        for maximizer_action in 0..state_box.num_maximizer_actions {
-            let mut inner_vec: Vec<f64> = vec![];
-            for minimizer_action in 0..state_box.num_minimizer_actions {
-                let child_box = state_box.children.get(maximizer_action * state_box.num_minimizer_actions + minimizer_action).unwrap();
-                inner_vec.push(heuristic_value_v2(child_box).expected_payoff);
-            }
-            payoff_matrix.push(inner_vec);
-        }
-
-        StateV2::calc_nash_eq(payoff_matrix)
+        StateV2::calc_nash_eq(payoff_matrix, state_box.num_maximizer_actions, state_box
+            .num_minimizer_actions)
     }
 }
 
@@ -384,18 +388,18 @@ fn play_out_turn_v2(state_box: &mut Box<StateV2>, mut move_action_queue: Vec<&Mo
 
     for pokemon_id in pokemon_ids {
         if let Some(pokemon_id) = pokemon_id {
-            if state_box.pokemon_by_id(pokemon_id).major_status_ailment() == MajorStatusAilment::Poisoned {
-                let display_text = format!("{} takes damage from poison!", state_box.pokemon_by_id(pokemon_id));
+            if state_box.pokemon[pokemon_id as usize].major_status_ailment() == MajorStatusAilment::Poisoned {
+                let display_text = format!("{} takes damage from poison!", state_box.pokemon[pokemon_id as usize]);
                 state_box.display_text.push(display_text);
-                if pokemon::apply_damage_v2(state_box, pokemon_id, max(state_box.pokemon_by_id(pokemon_id).max_hp / 8, 1) as i16) {
+                if pokemon::apply_damage_v2(state_box, pokemon_id, max(state_box.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16) {
                     return;
                 }
             }
 
-            if let Some(seeder_id) = state_box.pokemon_by_id(pokemon_id).seeded_by {
-                let display_text = format!("{}'s seed drains energy from {}!", state_box.pokemon_by_id(seeder_id), state_box.pokemon_by_id(pokemon_id));
+            if let Some(seeder_id) = state_box.pokemon[pokemon_id as usize].seeded_by {
+                let display_text = format!("{}'s seed drains energy from {}!", state_box.pokemon[pokemon_id as usize], state_box.pokemon[pokemon_id as usize]);
                 state_box.display_text.push(display_text);
-                let transferred_hp = max(state_box.pokemon_by_id(pokemon_id).max_hp / 8, 1) as i16;
+                let transferred_hp = max(state_box.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16;
                 if pokemon::apply_damage_v2(state_box, pokemon_id, transferred_hp) {
                     return;
                 }

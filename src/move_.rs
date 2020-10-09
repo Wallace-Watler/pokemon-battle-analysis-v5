@@ -92,26 +92,37 @@ impl MoveActionV2 {
         let user_major_status_ailment;
         let user_display_text;
         {
-            let user = state_box.pokemon_by_id(self.user_id);
+            let user = &state_box.pokemon[self.user_id as usize];
             user_major_status_ailment = user.major_status_ailment();
-            user_display_text = format!("{}", user);
+            if cfg!(feature = "printing") {
+                user_display_text = format!("{}", user);
+            } else {
+                user_display_text = String::new()
+            }
         }
 
         if user_major_status_ailment == MajorStatusAilment::Asleep {
-            state_box.display_text.push(format!("{} is fast asleep.", user_display_text));
+            if cfg!(feature = "printing") {
+                state_box.display_text.push(format!("{} is fast asleep.", user_display_text));
+            }
             return false;
         }
         if user_major_status_ailment == MajorStatusAilment::Frozen {
-            state_box.display_text.push(format!("{} is frozen solid!", user_display_text));
+            if cfg!(feature = "printing") {
+                state_box.display_text.push(format!("{} is frozen solid!", user_display_text));
+            }
             return false;
         }
         // TODO: Use seeded RNG
         if user_major_status_ailment == MajorStatusAilment::Paralyzed && rand::thread_rng().gen_bool(0.25) {
-            state_box.display_text.push(format!("{} is paralyzed! It can't move!", user_display_text));
+            if cfg!(feature = "printing") {
+                state_box.display_text.push(format!("{} is paralyzed! It can't move!", user_display_text));
+            }
+
             return false;
         }
 
-        let user = state_box.pokemon_by_id(self.user_id);
+        let user = &state_box.pokemon[self.user_id as usize];
         if user.current_hp == 0 || user.field_position == None { return false; }
         match self.move_index {
             Some(move_index) => {
@@ -132,8 +143,10 @@ impl MoveActionV2 {
             state_box.pokemon_by_id_mut(self.user_id).known_moves.get_mut(move_index).unwrap().pp -= 1;
         }
 
-        let user_display_text = format!("{}", state_box.pokemon_by_id_mut(self.user_id));
-        state_box.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
+        if cfg!(feature = "printing") {
+            let user_display_text = format!("{}", state_box.pokemon_by_id_mut(self.user_id));
+            state_box.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
+        }
 
         for target_pos in &self.target_positions {
             let target_id = if *target_pos == FieldPosition::Min {
@@ -144,15 +157,20 @@ impl MoveActionV2 {
 
             match target_id {
                 Some(target_id) => {
-                    let target_display_text = format!("{}", state_box.pokemon_by_id(target_id));
-                    state_box.display_text.push(format!("- {}", target_display_text));
+                    if cfg!(feature = "printing") {
+                        let target_display_text = format!("{}", &state_box.pokemon[target_id as usize]);
+                        state_box.display_text.push(format!("- {}", target_display_text));
+                    }
+
                     if (self.move_.effect)(state_box, move_action_queue, self.user_id, target_id) {
                         return true;
                     }
                 }
                 None => {
-                    state_box.display_text.push(String::from("- None"));
-                    state_box.display_text.push(String::from("But it failed!"));
+                    if cfg!(feature = "printing") {
+                        state_box.display_text.push(String::from("- None"));
+                        state_box.display_text.push(String::from("But it failed!"));
+                    }
                 }
             }
         }
@@ -312,8 +330,8 @@ fn growl_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_id
     let accuracy_check;
     let target_name;
     {
-        let user = state_box.pokemon_by_id(user_id);
-        let target = state_box.pokemon_by_id(target_id);
+        let user = &state_box.pokemon[user_id as usize];
+        let target = &state_box.pokemon[target_id as usize];
         accuracy_check = std_accuracy_check_v2(user, target, 100);
         target_name = target.species.name;
     }
@@ -332,8 +350,8 @@ fn leech_seed_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], us
     let target_name;
     let target_is_grass_type;
     {
-        let user = state_box.pokemon_by_id(user_id);
-        let target = state_box.pokemon_by_id(target_id);
+        let user = &state_box.pokemon[user_id as usize];
+        let target = &state_box.pokemon[target_id as usize];
         accuracy_check = std_accuracy_check_v2(user, target, 90);
         target_name = target.species.name;
         target_is_grass_type = target.is_type(Type::Grass);
@@ -344,7 +362,7 @@ fn leech_seed_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], us
         return false;
     }
 
-    match state_box.pokemon_by_id(target_id).seeded_by {
+    match &state_box.pokemon[target_id as usize].seeded_by {
         Some(_) => state_box.display_text.push(format!("{} is already seeded!", target_name)),
         None => {
             if target_is_grass_type {
@@ -369,8 +387,8 @@ fn struggle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user
     let user_max_hp;
     let user_major_status_ailment;
     {
-        let user = state_box.pokemon_by_id(user_id);
-        let target = state_box.pokemon_by_id(target_id);
+        let user = &state_box.pokemon[user_id as usize];
+        let target = &state_box.pokemon[target_id as usize];
         accuracy_check = game_version().gen() >= 4 || std_accuracy_check_v2(user, target, 100);
         target_name = target.species.name;
         offensive_stat_stage = user.stat_stage(offensive_stat_index);
@@ -423,7 +441,7 @@ fn struggle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user
     } else {
         max((user_max_hp as f64 / 4.0).round() as i16, 1)
     };
-    let user_display_text = format!("{}", state_box.pokemon_by_id(user_id));
+    let user_display_text = format!("{}", &state_box.pokemon[user_id as usize]);
     state_box.display_text.push(format!("{} took recoil damage!", user_display_text));
     pokemon::apply_damage_v2(state_box, user_id, recoil_damage)
 }
@@ -440,8 +458,8 @@ fn tackle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_i
     let defensive_stat_stage;
     let user_major_status_ailment;
     {
-        let user = state_box.pokemon_by_id(user_id);
-        let target = state_box.pokemon_by_id(target_id);
+        let user = &state_box.pokemon[user_id as usize];
+        let target = &state_box.pokemon[target_id as usize];
         accuracy_check = std_accuracy_check_v2(user, target, if game_version().gen() <= 4 { 95 } else { 100 });
         target_name = target.species.name;
         target_first_type = target.first_type;
@@ -492,7 +510,8 @@ fn tackle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_i
     };
 
     modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state_box.pokemon_by_id(user_id).is_type(damage_type) { modified_damage *= 1.5; }
+    if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
+        modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
     if type_effectiveness < 0.9 {
         state_box.display_text.push(String::from("It's not very effective..."));
@@ -517,8 +536,8 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     let defensive_stat_stage;
     let user_major_status_ailment;
     {
-        let user = state_box.pokemon_by_id(user_id);
-        let target = state_box.pokemon_by_id(target_id);
+        let user = &state_box.pokemon[user_id as usize];
+        let target = &state_box.pokemon[target_id as usize];
         accuracy_check = std_accuracy_check_v2(user, target, 100);
         target_name = target.species.name;
         target_first_type = target.first_type;
@@ -544,7 +563,7 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     let calculated_def = pokemon::calculated_stat_v2(state_box, target_id, defensive_stat_index);
 
     {
-        let user = state_box.pokemon_by_id(user_id);
+        let user = &state_box.pokemon[user_id as usize];
         if user.ability == Ability::Overgrow && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
     }
 
@@ -570,7 +589,8 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     };
 
     modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state_box.pokemon_by_id(user_id).is_type(damage_type) { modified_damage *= 1.5; }
+    if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
+        modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
     if type_effectiveness < 0.9 {
         state_box.display_text.push(String::from("It's not very effective..."));

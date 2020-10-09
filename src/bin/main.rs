@@ -1,5 +1,5 @@
-#[cfg(not(target_env = "msvc"))]
-use jemallocator::Jemalloc;
+// #[cfg(not(target_env = "msvc"))]
+// use jemallocator::Jemalloc;
 
 use pokemon_battle_analysis_v5::{GameVersion, state};
 use pokemon_battle_analysis_v5::move_;
@@ -7,9 +7,14 @@ use pokemon_battle_analysis_v5::setup::PokemonConfigV2;
 use pokemon_battle_analysis_v5::species;
 use pokemon_battle_analysis_v5::state::StateV2;
 
-#[cfg(not(target_env = "msvc"))]
+// #[cfg(not(target_env = "msvc"))]
+// #[global_allocator]
+// static GLOBAL: Jemalloc = Jemalloc;
+
+use tcmalloc::TCMalloc;
+
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: TCMalloc = TCMalloc;
 
 fn main() {
     //let args: Vec<String> = env::args().collect();
@@ -22,7 +27,21 @@ fn main() {
     }
 
     let bulbasaur_config = PokemonConfigV2::new();
-    let test_pokemon = [bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon(), bulbasaur_config.create_pokemon()];
+
+    let test_pokemon = [
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon()),
+        Box::new(bulbasaur_config.create_pokemon())
+    ];
 
     let test_state = || StateV2 {
         pokemon: test_pokemon.clone(),
@@ -37,5 +56,5 @@ fn main() {
         num_minimizer_actions: 0,
     };
 
-    state::run_battle_v2(test_state(), true);
+    state::run_battle_v2(test_state(), false);
 }
