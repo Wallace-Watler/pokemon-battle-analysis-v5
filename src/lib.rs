@@ -1,6 +1,3 @@
-extern crate strum;
-extern crate strum_macros;
-
 use std::cmp::max;
 use std::fmt::Debug;
 use std::intrinsics::transmute;
@@ -266,6 +263,7 @@ pub enum MajorStatusAilment {
     Frozen,
 }
 
+//#[cfg(feature = "print-battle")]
 impl MajorStatusAilment {
     const fn display_text_when_cured(&self) -> &'static str {
         match self {
@@ -367,6 +365,7 @@ pub enum StatIndex {
 }
 
 impl StatIndex {
+    //#[cfg(feature = "print-battle")]
     const fn name(&self) -> &str {
         match self {
             StatIndex::Hp => "HP",

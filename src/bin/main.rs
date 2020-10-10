@@ -11,10 +11,10 @@ use pokemon_battle_analysis_v5::state::StateV2;
 // #[global_allocator]
 // static GLOBAL: Jemalloc = Jemalloc;
 
-use tcmalloc::TCMalloc;
+//use tcmalloc::TCMalloc;
 
-#[global_allocator]
-static GLOBAL: TCMalloc = TCMalloc;
+//#[global_allocator]
+//static GLOBAL: TCMalloc = TCMalloc;
 
 fn main() {
     //let args: Vec<String> = env::args().collect();
@@ -56,5 +56,5 @@ fn main() {
         num_minimizer_actions: 0,
     };
 
-    state::run_battle_v2(test_state(), false);
+    state::run_battle_v2(test_state());
 }

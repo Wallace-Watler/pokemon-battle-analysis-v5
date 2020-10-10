@@ -89,36 +89,29 @@ impl MoveActionV2 {
     }
 
     pub fn can_be_performed(&self, state_box: &mut Box<StateV2>) -> bool {
-        let user_major_status_ailment;
-        let user_display_text;
-        {
-            let user = &state_box.pokemon[self.user_id as usize];
-            user_major_status_ailment = user.major_status_ailment();
-            if cfg!(feature = "printing") {
-                user_display_text = format!("{}", user);
-            } else {
-                user_display_text = String::new()
-            }
-        }
+        let user_major_status_ailment = state_box.pokemon[self.user_id as usize].major_status_ailment();
 
+        // TODO: Have MajorStatusAilment provide text to go here
         if user_major_status_ailment == MajorStatusAilment::Asleep {
-            if cfg!(feature = "printing") {
+            if cfg!(feature = "print-battle") {
+                let user_display_text = format!("{}", &state_box.pokemon[self.user_id as usize]);
                 state_box.display_text.push(format!("{} is fast asleep.", user_display_text));
             }
             return false;
         }
         if user_major_status_ailment == MajorStatusAilment::Frozen {
-            if cfg!(feature = "printing") {
+            if cfg!(feature = "print-battle") {
+                let user_display_text = format!("{}", &state_box.pokemon[self.user_id as usize]);
                 state_box.display_text.push(format!("{} is frozen solid!", user_display_text));
             }
             return false;
         }
         // TODO: Use seeded RNG
         if user_major_status_ailment == MajorStatusAilment::Paralyzed && rand::thread_rng().gen_bool(0.25) {
-            if cfg!(feature = "printing") {
+            if cfg!(feature = "print-battle") {
+                let user_display_text = format!("{}", &state_box.pokemon[self.user_id as usize]);
                 state_box.display_text.push(format!("{} is paralyzed! It can't move!", user_display_text));
             }
-
             return false;
         }
 
@@ -140,11 +133,11 @@ impl MoveActionV2 {
 
     pub fn perform(&self, state_box: &mut Box<StateV2>, move_action_queue: &[&MoveActionV2]) -> bool {
         if let Some(move_index) = self.move_index {
-            state_box.pokemon_by_id_mut(self.user_id).known_moves.get_mut(move_index).unwrap().pp -= 1;
+            state_box.pokemon[self.user_id as usize].known_moves.get_mut(move_index).unwrap().pp -= 1;
         }
 
-        if cfg!(feature = "printing") {
-            let user_display_text = format!("{}", state_box.pokemon_by_id_mut(self.user_id));
+        if cfg!(feature = "print-battle") {
+            let user_display_text = format!("{}", state_box.pokemon[self.user_id as usize]);
             state_box.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
         }
 
@@ -157,7 +150,7 @@ impl MoveActionV2 {
 
             match target_id {
                 Some(target_id) => {
-                    if cfg!(feature = "printing") {
+                    if cfg!(feature = "print-battle") {
                         let target_display_text = format!("{}", &state_box.pokemon[target_id as usize]);
                         state_box.display_text.push(format!("- {}", target_display_text));
                     }
@@ -167,7 +160,7 @@ impl MoveActionV2 {
                     }
                 }
                 None => {
-                    if cfg!(feature = "printing") {
+                    if cfg!(feature = "print-battle") {
                         state_box.display_text.push(String::from("- None"));
                         state_box.display_text.push(String::from("But it failed!"));
                     }
@@ -337,7 +330,9 @@ fn growl_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_id
     }
 
     if !accuracy_check {
-        state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        }
         return false;
     }
 
@@ -358,18 +353,28 @@ fn leech_seed_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], us
     }
 
     if !accuracy_check {
-        state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        }
         return false;
     }
 
     match &state_box.pokemon[target_id as usize].seeded_by {
-        Some(_) => state_box.display_text.push(format!("{} is already seeded!", target_name)),
+        Some(_) => {
+            if cfg!(feature = "print-battle") {
+                state_box.display_text.push(format!("{} is already seeded!", target_name));
+            }
+        },
         None => {
             if target_is_grass_type {
-                state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+                if cfg!(feature = "print-battle") {
+                    state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+                }
             } else {
-                state_box.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
-                state_box.display_text.push(format!("A seed was planted on {}!", target_name));
+                state_box.pokemon[target_id as usize].seeded_by = Some(user_id);
+                if cfg!(feature = "print-battle") {
+                    state_box.display_text.push(format!("A seed was planted on {}!", target_name));
+                }
             }
         }
     }
@@ -398,7 +403,9 @@ fn struggle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user
     }
 
     if !accuracy_check {
-        state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        }
         return false;
     }
 
@@ -419,7 +426,9 @@ fn struggle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user
 
     // TODO: Use seeded RNG
     let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
-        state_box.display_text.push(String::from("It's a critical hit!"));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(String::from("It's a critical hit!"));
+        }
         std_base_damage(50, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
     } else {
         std_base_damage(50, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
@@ -441,8 +450,10 @@ fn struggle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user
     } else {
         max((user_max_hp as f64 / 4.0).round() as i16, 1)
     };
-    let user_display_text = format!("{}", &state_box.pokemon[user_id as usize]);
-    state_box.display_text.push(format!("{} took recoil damage!", user_display_text));
+    if cfg!(feature = "print-battle") {
+        let user_display_text = format!("{}", &state_box.pokemon[user_id as usize]);
+        state_box.display_text.push(format!("{} took recoil damage!", user_display_text));
+    }
     pokemon::apply_damage_v2(state_box, user_id, recoil_damage)
 }
 
@@ -470,14 +481,18 @@ fn tackle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_i
     }
 
     if !accuracy_check {
-        state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        }
         return false;
     }
 
     let damage_type = Type::Normal;
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
-        state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+        }
         return false;
     }
 
@@ -503,7 +518,9 @@ fn tackle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_i
         _ => 40
     };
     let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
-        state_box.display_text.push(String::from("It's a critical hit!"));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(String::from("It's a critical hit!"));
+        }
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
     } else {
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
@@ -513,10 +530,12 @@ fn tackle_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], user_i
     if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
-    if type_effectiveness < 0.9 {
-        state_box.display_text.push(String::from("It's not very effective..."));
-    } else if type_effectiveness > 1.1 {
-        state_box.display_text.push(String::from("It's super effective!"));
+    if cfg!(feature = "print-battle") {
+        if type_effectiveness < 0.9 {
+            state_box.display_text.push(String::from("It's not very effective..."));
+        } else if type_effectiveness > 1.1 {
+            state_box.display_text.push(String::from("It's super effective!"));
+        }
     }
     if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
     modified_damage = modified_damage.max(1.0);
@@ -548,14 +567,18 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     }
 
     if !accuracy_check {
-        state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("{} avoided the attack!", target_name));
+        }
         return false;
     }
 
     let damage_type = Type::Grass;
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
-        state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
+        }
         return false;
     }
 
@@ -582,7 +605,9 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     // TODO: Use seeded RNG
     let move_power = if game_version().gen() <= 5 { 35 } else { 45 };
     let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
-        state_box.display_text.push(String::from("It's a critical hit!"));
+        if cfg!(feature = "print-battle") {
+            state_box.display_text.push(String::from("It's a critical hit!"));
+        }
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
     } else {
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
@@ -592,10 +617,12 @@ fn vine_whip_v2(state_box: &mut Box<StateV2>, _move_queue: &[&MoveActionV2], use
     if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
-    if type_effectiveness < 0.9 {
-        state_box.display_text.push(String::from("It's not very effective..."));
-    } else if type_effectiveness > 1.1 {
-        state_box.display_text.push(String::from("It's super effective!"));
+    if cfg!(feature = "print-battle") {
+        if type_effectiveness < 0.9 {
+            state_box.display_text.push(String::from("It's not very effective..."));
+        } else if type_effectiveness > 1.1 {
+            state_box.display_text.push(String::from("It's super effective!"));
+        }
     }
     if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
     modified_damage = modified_damage.max(1.0);

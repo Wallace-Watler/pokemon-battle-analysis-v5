@@ -6,38 +6,41 @@ use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, T
 use crate::move_::MoveActionV2;
 use crate::pokemon::PokemonV2;
 
-const AI_LEVEL: u8 = 4;
+pub const AI_LEVEL: u8 = 3;
 const MAX_ACTIONS_PER_AGENT: usize = 9;
 
 #[derive(Debug)]
 struct ZeroSumNashEq {
+    /// The maximizing player's strategy at equilibrium.
     max_player_strategy: [f64; MAX_ACTIONS_PER_AGENT],
-    // The maximizing player's strategy at equilibrium
+    /// The minimizing player's strategy at equilibrium.
     min_player_strategy: [f64; MAX_ACTIONS_PER_AGENT],
-    // The minimizing player's strategy at equilibrium
-    expected_payoff: f64, // The expected payoff for the maximizing player at equilibrium
+    /// The expected payoff for the maximizing player at equilibrium.
+    expected_payoff: f64
 }
 
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
 pub struct StateV2 {
+    /// ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team.
     pub pokemon: [Box<PokemonV2>; 12],
-    // ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team
+    /// Pokemon of the minimizing team that is on the field.
     pub min_pokemon_id: Option<u8>,
-    // Pokemon of the minimizing team that is on the field
+    /// Pokemon of the maximizing team that is on the field.
     pub max_pokemon_id: Option<u8>,
-    // Pokemon of the maximizing team that is on the field
     pub weather: Weather,
     pub terrain: Terrain,
     pub turn_number: u16,
+    /// Battle print-out that is shown when this state is entered; useful for sanity checks.
+    //#[cfg(feature = "print-battle")]
     pub display_text: Vec<String>,
-    // Battle print-out that is shown when this state is entered; useful for sanity checks
     pub children: Vec<Box<StateV2>>,
     pub num_maximizer_actions: usize,
     pub num_minimizer_actions: usize,
 }
 
 impl StateV2 {
+    //#[cfg(feature = "print-battle")]
     fn print_display_text(&self) {
         self.display_text.iter().for_each(|text| {
             text.lines().for_each(|line| println!("  {}", line));
@@ -47,7 +50,7 @@ impl StateV2 {
     /// Calculates the Nash equilibrium of a zero-sum payoff matrix.
     /// Algorithm follows https://www.math.ucla.edu/~tom/Game_Theory/mat.pdf, section 4.5.
     fn calc_nash_eq(payoff_matrix: Vec<f64>, m: usize, n: usize) -> ZeroSumNashEq {
-        // Algorithm requires that all elements be positive, so ADDED_CONSTANT is added to ensure this.
+        /// Algorithm requires that all elements be positive, so ADDED_CONSTANT is added to ensure this.
         const ADDED_CONSTANT: f64 = 2.0;
 
         let mut tableau = [[0.0; MAX_ACTIONS_PER_AGENT + 1]; MAX_ACTIONS_PER_AGENT + 1];
@@ -150,10 +153,6 @@ impl StateV2 {
         }
     }
 
-    pub fn pokemon_by_id_mut(&mut self, id: u8) -> &mut PokemonV2 {
-        &mut self.pokemon[id as usize]
-    }
-
     pub fn battle_end_check(&self) -> bool {
         self.pokemon[0..5].iter().all(|pokemon| pokemon.current_hp == 0) || self.pokemon[6..11].iter().all(|pokemon| pokemon.current_hp == 0)
     }
@@ -171,8 +170,8 @@ impl StateV2 {
  * @return A heuristic value between -1.0 and 1.0 signifying how well the maximizer did; 0.0 would be a tie. The
  * minimizer's value is just its negation.
  */
-pub fn run_battle_v2(state: StateV2, print_battle: bool) -> f64 {
-    if print_battle {
+pub fn run_battle_v2(state: StateV2) -> f64 {
+    if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
     }
@@ -189,11 +188,15 @@ pub fn run_battle_v2(state: StateV2, print_battle: bool) -> f64 {
         let child_index = maximizer_choice * state_box.num_minimizer_actions + minimizer_choice;
         let child_box = state_box.children.remove(child_index);
         state_box = child_box;
-        if print_battle { state_box.print_display_text(); }
+        if cfg!(feature = "print-battle") {
+            state_box.print_display_text();
+        }
         generate_child_states_v2(&mut state_box, AI_LEVEL);
     }
 
-    if print_battle { println!("<<<< BATTLE END >>>>"); }
+    if cfg!(feature = "print-battle") {
+        println!("<<<< BATTLE END >>>>");
+    }
     heuristic_value_v2(&state_box).expected_payoff
 }
 
@@ -273,10 +276,10 @@ fn generate_child_states_v2(state_box: &mut Box<StateV2>, mut recursions: u8) {
                     if let Some(next_move_action) = state_box.pokemon[user_id as usize].next_move_action.clone() { // TODO: Is this actually what should happen?
                         if next_move_action.can_be_performed(state_box) {
                             user_actions.push(next_move_action);
-                            state_box.pokemon_by_id_mut(user_id).next_move_action = None;
+                            state_box.pokemon[user_id as usize].next_move_action = None;
                             return user_actions;
                         } else {
-                            state_box.pokemon_by_id_mut(user_id).next_move_action = None;
+                            state_box.pokemon[user_id as usize].next_move_action = None;
                         }
                     }
 
@@ -361,13 +364,14 @@ fn heuristic_value_v2(state_box: &Box<StateV2>) -> ZeroSumNashEq {
 // TODO: Pass actions directly without using queues
 fn play_out_turn_v2(state_box: &mut Box<StateV2>, mut move_action_queue: Vec<&MoveActionV2>) {
     let turn_number = state_box.turn_number;
-    state_box.display_text.push(format!("---- Turn {} ----", turn_number));
+    if cfg!(feature = "print-battle") {
+        state_box.display_text.push(format!("---- Turn {} ----", turn_number));
+    }
 
     unsafe {
         if move_action_queue.len() == 2 && move_action_queue.get_unchecked(1).outspeeds(state_box, move_action_queue.get_unchecked(0)) {
-            let first_move_action = move_action_queue.remove(0);
-            move_action_queue.push(first_move_action);
-        } else if move_action_queue.len() > 2 { panic!("'moveActionQueue' size is greater than 2."); }
+            move_action_queue.swap(0, 1);
+        }
     }
 
     while !move_action_queue.is_empty() {
@@ -389,16 +393,20 @@ fn play_out_turn_v2(state_box: &mut Box<StateV2>, mut move_action_queue: Vec<&Mo
     for pokemon_id in pokemon_ids {
         if let Some(pokemon_id) = pokemon_id {
             if state_box.pokemon[pokemon_id as usize].major_status_ailment() == MajorStatusAilment::Poisoned {
-                let display_text = format!("{} takes damage from poison!", state_box.pokemon[pokemon_id as usize]);
-                state_box.display_text.push(display_text);
+                if cfg!(feature = "print-battle") {
+                    let display_text = format!("{} takes damage from poison!", state_box.pokemon[pokemon_id as usize]);
+                    state_box.display_text.push(display_text);
+                }
                 if pokemon::apply_damage_v2(state_box, pokemon_id, max(state_box.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16) {
                     return;
                 }
             }
 
             if let Some(seeder_id) = state_box.pokemon[pokemon_id as usize].seeded_by {
-                let display_text = format!("{}'s seed drains energy from {}!", state_box.pokemon[pokemon_id as usize], state_box.pokemon[pokemon_id as usize]);
-                state_box.display_text.push(display_text);
+                if cfg!(feature = "print-battle") {
+                    let display_text = format!("{}'s seed drains energy from {}!", state_box.pokemon[pokemon_id as usize], state_box.pokemon[pokemon_id as usize]);
+                    state_box.display_text.push(display_text);
+                }
                 let transferred_hp = max(state_box.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16;
                 if pokemon::apply_damage_v2(state_box, pokemon_id, transferred_hp) {
                     return;
