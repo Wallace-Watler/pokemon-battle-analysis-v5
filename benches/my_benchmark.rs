@@ -1,17 +1,16 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
-use pokemon_battle_analysis_v5::state::StateV2;
-use pokemon_battle_analysis_v5::setup::PokemonConfigV2;
-use std::time::Duration;
+use pokemon_battle_analysis_v5::state::State;
+use pokemon_battle_analysis_v5::setup::PokemonConfig;
 
 fn ai_benchmark(c: &mut Criterion) {
     unsafe {
         pokemon_battle_analysis_v5::GAME_VERSION = GameVersion::XY;
-        move_::initialize_moves_v2();
-        species::initialize_species_v2();
+        move_::initialize_moves();
+        species::initialize_species();
     }
 
-    let bulbasaur_config = PokemonConfigV2::new();
+    let bulbasaur_config = PokemonConfig::new();
     let test_pokemon = [
         Box::new(bulbasaur_config.create_pokemon()),
         Box::new(bulbasaur_config.create_pokemon()),
@@ -27,7 +26,7 @@ fn ai_benchmark(c: &mut Criterion) {
         Box::new(bulbasaur_config.create_pokemon())
     ];
 
-    let test_state = || StateV2 {
+    let test_state = || State {
         pokemon: test_pokemon.clone(),
         min_pokemon_id: None,
         max_pokemon_id: None,
@@ -41,7 +40,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle_v2(test_state())));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state())));
 }
 
 criterion_group!{

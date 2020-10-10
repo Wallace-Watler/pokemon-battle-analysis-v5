@@ -6,6 +6,7 @@ use rand::Rng;
 
 use crate::move_::MoveCategory;
 
+pub mod game_theory;
 pub mod move_;
 pub mod pokemon;
 pub mod setup;
@@ -106,25 +107,24 @@ impl Type {
         unsafe {
             match self {
                 Type::None => 1.0,
-                Type::Normal => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0, 0.5, 1.0, 1.0, 1.0,
-                    1.0, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Fighting => [1.0, 2.0, 1.0, 0.5, 0.5, 1.0, 2.0, 0.5, 0.0, 2.0, 1.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 2.0, 0.5][transmute::<Type, u8>(defending_type) as usize],
-                Type::Flying => [1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 0.5, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Poison => [1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 0.5, 0.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Ground => [1.0, 1.0, 1.0, 0.0, 2.0, 1.0, 2.0, 0.5, 1.0, 2.0, 2.0, 1.0, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Rock => [1.0, 1.0, 0.5, 2.0, 1.0, 0.5, 1.0, 2.0, 1.0, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Bug => [1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 2.0, 0.5][transmute::<Type, u8>(defending_type) as usize],
-                Type::Ghost => [1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, if game_version().gen() <= 5 { 0.5 } else { 1.0 }, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Steel => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 0.5, 1.0, 2.0, 1.0, 1.0, 2.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Fire => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 2.0, 0.5, 0.5, 2.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Water => [1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Grass => [1.0, 1.0, 1.0, 0.5, 0.5, 2.0, 2.0, 0.5, 1.0, 0.5, 0.5, 2.0, 0.5, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Electric => [1.0, 1.0, 1.0, 2.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Psychic => [1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 0.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Ice => [1.0, 1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 2.0, 1.0, 1.0, 0.5, 2.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Dragon => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.0][transmute::<Type, u8>(defending_type) as usize],
-                Type::Dark => [1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, if game_version().gen() <= 5 { 0.5 } else { 1.0 }, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 0.5][transmute::<Type, u8>(defending_type) as usize],
-                Type::Fairy => [1.0, 1.0, 2.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0][transmute::<Type, u8>(defending_type) as usize]
+                Type::Normal   => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,                                               0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Fighting => [1.0, 2.0, 1.0, 0.5, 0.5, 1.0, 2.0, 0.5, 0.0,                                               2.0, 1.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0, 2.0, 0.5][transmute::<Type, u8>(defending_type) as usize],
+                Type::Flying   => [1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0,                                               0.5, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Poison   => [1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 0.5,                                               0.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Ground   => [1.0, 1.0, 1.0, 0.0, 2.0, 1.0, 2.0, 0.5, 1.0,                                               2.0, 2.0, 1.0, 0.5, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Rock     => [1.0, 1.0, 0.5, 2.0, 1.0, 0.5, 1.0, 2.0, 1.0,                                               0.5, 2.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Bug      => [1.0, 1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5,                                               0.5, 0.5, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 2.0, 0.5][transmute::<Type, u8>(defending_type) as usize],
+                Type::Ghost    => [1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, if game_version().gen() <= 5 { 0.5 } else { 1.0 }, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Steel    => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0,                                               0.5, 0.5, 0.5, 1.0, 0.5, 1.0, 2.0, 1.0, 1.0, 2.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Fire     => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 2.0, 1.0,                                               2.0, 0.5, 0.5, 2.0, 1.0, 1.0, 2.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Water    => [1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0,                                               1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Grass    => [1.0, 1.0, 1.0, 0.5, 0.5, 2.0, 2.0, 0.5, 1.0,                                               0.5, 0.5, 2.0, 0.5, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Electric => [1.0, 1.0, 1.0, 2.0, 1.0, 0.0, 1.0, 1.0, 1.0,                                               1.0, 1.0, 2.0, 0.5, 0.5, 1.0, 1.0, 0.5, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Psychic  => [1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0,                                               0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 1.0, 1.0, 0.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Ice      => [1.0, 1.0, 1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 1.0,                                               0.5, 0.5, 0.5, 2.0, 1.0, 1.0, 0.5, 2.0, 1.0, 1.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Dragon   => [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,                                               0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 0.0][transmute::<Type, u8>(defending_type) as usize],
+                Type::Dark     => [1.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, if game_version().gen() <= 5 { 0.5 } else { 1.0 }, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 0.5, 0.5][transmute::<Type, u8>(defending_type) as usize],
+                Type::Fairy    => [1.0, 1.0, 2.0, 1.0, 0.5, 1.0, 1.0, 1.0, 1.0,                                               0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0][transmute::<Type, u8>(defending_type) as usize]
             }
         }
     }
@@ -263,7 +263,6 @@ pub enum MajorStatusAilment {
     Frozen,
 }
 
-//#[cfg(feature = "print-battle")]
 impl MajorStatusAilment {
     const fn display_text_when_cured(&self) -> &'static str {
         match self {
@@ -273,6 +272,15 @@ impl MajorStatusAilment {
             MajorStatusAilment::Burned => " was cured of its burn!",
             MajorStatusAilment::Frozen => " thawed out!",
             _ => " was cured of its poisoning!"
+        }
+    }
+
+    const fn display_text_when_blocking_move(&self) -> &'static str {
+        match self {
+            MajorStatusAilment::Asleep => " is fast asleep.",
+            MajorStatusAilment::Paralyzed => " is paralyzed! It can't move!",
+            MajorStatusAilment::Frozen => " is frozen solid!",
+            _ => ""
         }
     }
 }
@@ -322,30 +330,28 @@ impl Nature {
     fn stat_mod(&self, stat_index: StatIndex) -> f64 {
         match stat_index {
             StatIndex::Hp | StatIndex::Acc | StatIndex::Eva => 1.0,
-            _ => unsafe {
-                match self {
-                    Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Bold => [0.9, 1.1, 1.0, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Brave => [1.1, 1.0, 1.0, 1.0, 0.9][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Calm => [0.9, 1.0, 1.0, 1.1, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Gentle => [1.0, 0.9, 1.0, 1.1, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Hasty => [1.0, 0.9, 1.0, 1.0, 1.1][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Impish => [1.0, 1.1, 0.9, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Jolly => [1.0, 1.0, 0.9, 1.0, 1.1][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Lax => [1.0, 1.1, 1.0, 0.9, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Lonely => [1.1, 0.9, 1.0, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Mild => [1.0, 0.9, 1.1, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Modest => [0.9, 1.0, 1.1, 1.0, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Naive => [1.0, 1.0, 1.0, 0.9, 1.1][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Quiet => [1.0, 1.0, 1.1, 1.0, 0.9][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Rash => [1.0, 1.0, 1.1, 0.9, 1.0][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Sassy => [1.0, 1.0, 1.0, 1.1, 0.9][transmute::<StatIndex, usize>(stat_index) - 1],
-                    Nature::Timid => [0.9, 1.0, 1.0, 1.0, 1.1][transmute::<StatIndex, usize>(stat_index) - 1],
-                    _ => 1.0
-                }
+            _ => match self {
+                Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Bold    => [0.9, 1.1, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Brave   => [1.1, 1.0, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Calm    => [0.9, 1.0, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Gentle  => [1.0, 0.9, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Hasty   => [1.0, 0.9, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
+                Nature::Impish  => [1.0, 1.1, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Jolly   => [1.0, 1.0, 0.9, 1.0, 1.1][stat_index.as_usize() - 1],
+                Nature::Lax     => [1.0, 1.1, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Lonely  => [1.1, 0.9, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Mild    => [1.0, 0.9, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Modest  => [0.9, 1.0, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Naive   => [1.0, 1.0, 1.0, 0.9, 1.1][stat_index.as_usize() - 1],
+                Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Quiet   => [1.0, 1.0, 1.1, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Rash    => [1.0, 1.0, 1.1, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Sassy   => [1.0, 1.0, 1.0, 1.1, 0.9][stat_index.as_usize() - 1],
+                Nature::Timid   => [0.9, 1.0, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
+                _ => 1.0
             }
         }
     }
@@ -365,7 +371,6 @@ pub enum StatIndex {
 }
 
 impl StatIndex {
-    //#[cfg(feature = "print-battle")]
     const fn name(&self) -> &str {
         match self {
             StatIndex::Hp => "HP",

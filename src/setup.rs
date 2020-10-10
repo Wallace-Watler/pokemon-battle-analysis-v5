@@ -1,31 +1,30 @@
 use rand::Rng;
 
 use crate::{Ability, Gender, Nature};
-use crate::move_::MoveV2;
-use crate::pokemon::PokemonV2;
-use crate::species::SpeciesV2;
+use crate::move_::Move;
+use crate::pokemon::Pokemon;
+use crate::species::Species;
 
-/**
- * Part of a {@code TeamConfig}; contains all the necessary information to create a {@code Pokemon} object.
- */
-pub struct PokemonConfigV2 {
-    species: &'static SpeciesV2,
+/// Part of a `TeamConfig`; contains all the necessary information to create a `Pokemon` object.
+pub struct PokemonConfig {
+    species: &'static Species,
     gender: Gender,
     nature: Nature,
     ability: Ability,
     ivs: [u8; 6],
     evs: [u8; 6],
-    moves: Vec<&'static MoveV2>,
+    moves: Vec<&'static Move>,
 }
 
-impl PokemonConfigV2 {
-    pub fn new() -> PokemonConfigV2 {
-        let species = SpeciesV2::random_species();
-        let mut pokemon_config = PokemonConfigV2 {
+impl PokemonConfig {
+    pub fn new() -> PokemonConfig {
+        let species = Species::random_species();
+        let mut pokemon_config = PokemonConfig {
             species,
             gender: species.random_gender(),
             nature: Nature::random_nature(),
             ability: species.random_ability(),
+            // TODO: Use seeded RNG
             ivs: [rand::thread_rng().gen_range(0, 32); 6],
             evs: [rand::thread_rng().gen_range(0, 253); 6],
             moves: species.random_move_set(),
@@ -34,10 +33,11 @@ impl PokemonConfigV2 {
         pokemon_config
     }
 
-    pub fn create_pokemon(&self) -> PokemonV2 {
-        PokemonV2::new(self.species, self.gender, self.nature, self.ability, self.ivs, self.evs, &self.moves)
+    pub fn create_pokemon(&self) -> Pokemon {
+        Pokemon::new(self.species, self.gender, self.nature, self.ability, self.ivs, self.evs, &self.moves)
     }
 
+    // TODO: Use seeded RNG
     fn fix_evs(&mut self) {
         let mut ev_sum: u16 = self.evs.iter().map(|ev| *ev as u16).sum();
         while ev_sum < 510 {

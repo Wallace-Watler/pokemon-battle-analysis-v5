@@ -1,16 +1,17 @@
 use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
 
-use crate::{Ability, clamp, FieldPosition, game_version, Gender, MajorStatusAilment, Nature, StatIndex, Type, Weather};
-use crate::move_::{MoveActionV2, MoveV2};
-use crate::species::SpeciesV2;
-use crate::state::StateV2;
+use crate::{Ability, FieldPosition, game_version, Gender, MajorStatusAilment, Nature, StatIndex, Type, Weather, clamp};
+use crate::move_::{MoveAction, Move};
+use crate::species::Species;
+use crate::state::State;
 
 #[derive(Clone, Debug)]
-pub struct PokemonV2 {
-    pub species: &'static SpeciesV2,
-    pub first_type: Type,
+/// Assumed to be level 100.
+pub struct Pokemon {
+    pub species: &'static Species,
     // Types usually match the species' type, but some Pokemon can change types
+    pub first_type: Type,
     pub second_type: Type,
     gender: Gender,
     nature: Nature,
@@ -25,16 +26,17 @@ pub struct PokemonV2 {
     major_status_ailment: MajorStatusAilment,
     msa_counter: u16,
     msa_counter_target: Option<u16>,
-    snore_sleep_talk_counter: u8, // Only used in gen 3; otherwise it's always 0
+    /// Only used in gen 3; otherwise it's always 0.
+    snore_sleep_talk_counter: u16,
 
     // Minor status ailments
+    /// Turn on which confusion was inflicted.
     confusion_turn_inflicted: Option<u16>,
-    // Turn on which confusion was inflicted
+    /// Turn on which confusion will be cured naturally.
     confusion_turn_will_cure: Option<u16>,
-    // Turn on which confusion will be cured naturally
     is_flinching: bool,
+    /// ID of the Pokemon that seeded this Pokemon.
     pub seeded_by: Option<u8>,
-    // ID of the Pokemon that seeded this Pokemon
     is_infatuated: bool,
     is_cursed: bool,
     has_nightmare: bool,
@@ -42,14 +44,15 @@ pub struct PokemonV2 {
     pub field_position: Option<FieldPosition>,
 
     // Moves
-    pub known_moves: Vec<MoveInstanceV2>,
-    pub next_move_action: Option<MoveActionV2>, // Needed for handling two-turn moves
+    pub known_moves: Vec<MoveInstance>,
+    /// Needed for handling two-turn moves.
+    pub next_move_action: Option<MoveAction>
 }
 
-impl PokemonV2 {
-    pub fn new(species: &'static SpeciesV2, gender: Gender, nature: Nature, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static MoveV2]) -> PokemonV2 {
+impl Pokemon {
+    pub fn new(species: &'static Species, gender: Gender, nature: Nature, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static Move]) -> Pokemon {
         let max_hp = (2 * species.base_stat(StatIndex::Hp) + ivs[StatIndex::Hp.as_usize()] + evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
-        PokemonV2 {
+        Pokemon {
             species,
             first_type: species.first_type,
             second_type: species.second_type,
@@ -73,7 +76,7 @@ impl PokemonV2 {
             is_cursed: false,
             has_nightmare: false,
             field_position: None,
-            known_moves: known_moves.iter().map(|move_| MoveInstanceV2::new(move_)).collect(),
+            known_moves: known_moves.iter().map(|move_| MoveInstance::new(move_)).collect(),
             next_move_action: None,
         }
     }
@@ -103,22 +106,22 @@ impl PokemonV2 {
     }
 }
 
-impl Display for PokemonV2 {
+impl Display for Pokemon {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         write!(f, "{}{}({}/{})", self.species.name, self.gender.symbol(), self.current_hp, self.max_hp)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct MoveInstanceV2 {
-    pub move_: &'static MoveV2,
+pub struct MoveInstance {
+    pub move_: &'static Move,
     pub pp: u8,
     pub disabled: bool,
 }
 
-impl MoveInstanceV2 {
-    fn new(move_: &'static MoveV2) -> MoveInstanceV2 {
-        MoveInstanceV2 {
+impl MoveInstance {
+    fn new(move_: &'static Move) -> MoveInstance {
+        MoveInstance {
             move_,
             pp: move_.max_pp,
             disabled: false,
@@ -126,7 +129,7 @@ impl MoveInstanceV2 {
     }
 }
 
-pub fn calculated_stat_v2(state_box: &Box<StateV2>, pokemon_id: u8, stat_index: StatIndex) -> u32 {
+pub fn calculated_stat(state_box: &Box<State>, pokemon_id: u8, stat_index: StatIndex) -> u32 {
     let pokemon = &state_box.pokemon[pokemon_id as usize];
 
     if stat_index == StatIndex::Hp { return pokemon.max_hp as u32; }
@@ -146,7 +149,7 @@ pub fn calculated_stat_v2(state_box: &Box<StateV2>, pokemon_id: u8, stat_index: 
     calculated_stat
 }
 
-pub fn add_to_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, field_position: FieldPosition) -> bool {
+pub fn add_to_field(state_box: &mut Box<State>, pokemon_id: u8, field_position: FieldPosition) -> bool {
     state_box.pokemon[pokemon_id as usize].field_position = Some(field_position);
 
     if cfg!(feature = "print-battle") {
@@ -177,8 +180,8 @@ pub fn add_to_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, field_posit
     state_box.battle_end_check()
 }
 
-fn remove_from_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
-    remove_minor_status_ailments_v2(state_box, pokemon_id);
+fn remove_from_field(state_box: &mut Box<State>, pokemon_id: u8) {
+    remove_minor_status_ailments(state_box, pokemon_id);
 
     let old_field_pos;
     {
@@ -222,7 +225,7 @@ fn remove_from_field_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
     }
 }
 
-pub fn increment_stat_stage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
+pub fn increment_stat_stage(state_box: &mut Box<State>, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
     let old_stat_stage;
     let new_stat_stage;
     {
@@ -247,7 +250,7 @@ pub fn increment_stat_stage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, sta
     }
 }
 
-pub fn increment_msa_counter_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
+pub fn increment_msa_counter(state_box: &mut Box<State>, pokemon_id: u8) {
     let mut msa_cured = false;
     {
         let pokemon = &mut state_box.pokemon[pokemon_id as usize];
@@ -274,7 +277,7 @@ pub fn increment_msa_counter_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
 }
 
 /// The amount can be negative to add HP.
-pub fn apply_damage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, amount: i16) -> bool {
+pub fn apply_damage(state_box: &mut Box<State>, pokemon_id: u8, amount: i16) -> bool {
     let new_hp = state_box.pokemon[pokemon_id as usize].current_hp as i16 - amount;
     if new_hp <= 0 {
         state_box.pokemon[pokemon_id as usize].current_hp = 0;
@@ -282,7 +285,7 @@ pub fn apply_damage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, amount: i16
             let display_text = format!("{} fainted!", &state_box.pokemon[pokemon_id as usize]);
             state_box.display_text.push(display_text);
         }
-        remove_from_field_v2(state_box, pokemon_id);
+        remove_from_field(state_box, pokemon_id);
         return state_box.battle_end_check();
     }
 
@@ -291,7 +294,7 @@ pub fn apply_damage_v2(state_box: &mut Box<StateV2>, pokemon_id: u8, amount: i16
     false
 }
 
-fn remove_minor_status_ailments_v2(state_box: &mut Box<StateV2>, pokemon_id: u8) {
+fn remove_minor_status_ailments(state_box: &mut Box<State>, pokemon_id: u8) {
     let pokemon = &mut state_box.pokemon[pokemon_id as usize];
     pokemon.confusion_turn_inflicted = None;
     pokemon.confusion_turn_will_cure = None;
