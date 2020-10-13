@@ -2,6 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
 use pokemon_battle_analysis_v5::state::State;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
+use pokemon_battle_analysis_v5::game_theory::Matrix;
 
 fn ai_benchmark(c: &mut Criterion) {
     unsafe {
@@ -33,8 +34,8 @@ fn ai_benchmark(c: &mut Criterion) {
         weather: Default::default(),
         terrain: Default::default(),
         turn_number: 0,
-        display_text: vec![],
-        children: vec![],
+        display_text: Vec::new(),
+        children: Vec::new(),
         num_maximizer_actions: 0,
         num_minimizer_actions: 0
     };

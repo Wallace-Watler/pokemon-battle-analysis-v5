@@ -50,10 +50,10 @@ fn main() {
         weather: Default::default(),
         terrain: Default::default(),
         turn_number: 0,
-        display_text: vec![],
-        children: vec![],
+        display_text: Vec::new(),
+        children: Vec::new(),
         num_maximizer_actions: 0,
-        num_minimizer_actions: 0,
+        num_minimizer_actions: 0
     };
 
     state::run_battle(test_state());

@@ -33,17 +33,21 @@ pub enum MoveTargeting {
 
 impl MoveTargeting {
     const fn _single_target(&self) -> bool {
-        match self {
-            MoveTargeting::RandomOpponent | MoveTargeting::SingleAdjacentAlly | MoveTargeting::SingleAdjacentOpponent | MoveTargeting::SingleAdjacentPokemon | MoveTargeting::SinglePokemon | MoveTargeting::User | MoveTargeting::UserOrAdjacentAlly => true,
-            _ => false
-        }
+        matches!(self, MoveTargeting::RandomOpponent
+                     | MoveTargeting::SingleAdjacentAlly
+                     | MoveTargeting::SingleAdjacentOpponent
+                     | MoveTargeting::SingleAdjacentPokemon
+                     | MoveTargeting::SinglePokemon
+                     | MoveTargeting::User
+                     | MoveTargeting::UserOrAdjacentAlly)
     }
 
     const fn _only_targets_allies(&self) -> bool {
-        match self {
-            MoveTargeting::SingleAdjacentAlly | MoveTargeting::User | MoveTargeting::UserOrAdjacentAlly | MoveTargeting::UserAndAllAllies | MoveTargeting::AllAllies => true,
-            _ => false
-        }
+        matches!(self, MoveTargeting::SingleAdjacentAlly
+                     | MoveTargeting::User
+                     | MoveTargeting::UserOrAdjacentAlly
+                     | MoveTargeting::UserAndAllAllies
+                     | MoveTargeting::AllAllies)
     }
 
     pub fn can_hit(&self, user_pos: FieldPosition, target_pos: FieldPosition) -> bool {

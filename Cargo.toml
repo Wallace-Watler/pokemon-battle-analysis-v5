@@ -11,8 +11,6 @@ print-battle = []
 almost = "0.2.0"
 #lazy_static = "1.4.0"
 rand = "0.7.3"
-#strum = "0.19.2"
-#strum_macros = "0.19.2"
 
 #[dependencies.tcmalloc]
 #version = "0.3.0"
