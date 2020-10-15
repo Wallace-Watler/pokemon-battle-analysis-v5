@@ -1,3 +1,6 @@
+use std::fmt::{Display, Formatter, Error};
+use std::f64;
+
 #[derive(Debug)]
 pub struct ZeroSumNashEq {
     /// The maximizing player's strategy at equilibrium.
@@ -12,14 +15,26 @@ pub struct ZeroSumNashEq {
 /// The algorithm follows [Game Theory](docs/Game_Theory.pdf), section 4.5.
 /// It requires that all elements be positive, so supply `added_constant` to ensure this; it will
 /// not affect the equilibrium.
-pub fn calc_nash_eq(payoff_matrix: &Matrix, added_constant: f64) -> ZeroSumNashEq {
-    let m = payoff_matrix.num_rows();
-    let n = payoff_matrix.num_cols();
+pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq {
+    if row_domination.len() != payoff_matrix.num_rows() as usize || col_domination.len() != payoff_matrix.num_cols() as usize {
+        panic!("Domination labels must match the payoff matrix shape.");
+    }
 
+    let m = payoff_matrix.num_rows() - row_domination.iter().filter(|b| **b).count() as u16;
+    let n = payoff_matrix.num_cols() - col_domination.iter().filter(|b| **b).count() as u16;
     let mut tableau = Matrix::of(0.0, m + 1, n + 1);
-    for i in 0..m {
-        for j in 0..n {
-            *tableau.get_mut(i, j) = payoff_matrix.get(i, j) + added_constant;
+
+    let mut i_t = 0;
+    for i in 0..payoff_matrix.num_rows() {
+        if !row_domination.get(i as usize).unwrap() {
+            let mut j_t = 0;
+            for j in 0..payoff_matrix.num_cols() {
+                if !col_domination.get(j as usize).unwrap() {
+                    *tableau.get_mut(i_t, j_t) = payoff_matrix.get(i, j) + added_constant;
+                    j_t += 1;
+                }
+            }
+            i_t += 1;
         }
     }
 
@@ -90,6 +105,17 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, added_constant: f64) -> ZeroSumNashE
         }
     }
 
+    for i in 0..row_domination.len() {
+        if *row_domination.get(i).unwrap() {
+            max_player_strategy.insert(i, 0.0);
+        }
+    }
+    for j in 0..col_domination.len() {
+        if *col_domination.get(j).unwrap() {
+            min_player_strategy.insert(j, 0.0);
+        }
+    }
+
     ZeroSumNashEq {
         max_player_strategy,
         min_player_strategy,
@@ -97,11 +123,12 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, added_constant: f64) -> ZeroSumNashE
     }
 }
 
-// TODO: Generify with copiable T (so that basis labels can be Matrix<bool>)
+// TODO: Create Tableau struct that contains a Matrix, a is_col_basis: Vec<bool>, and a basis_col: Vec<Option<usize>> (Option because a row can be all zeros)
+#[derive(Clone)]
 pub struct Matrix {
     entries: Vec<f64>,
-    num_rows: u16,
-    num_cols: u16
+    num_rows: u16, // TODO: make usize
+    num_cols: u16 // TODO: make usize
 }
 
 impl Matrix {
@@ -122,22 +149,50 @@ impl Matrix {
         }
     }
 
-    pub fn from_restricted_matrix(matrix: &Matrix, row_exclusion: &[bool], col_exclusion: &[bool]) -> Matrix {
-        if row_exclusion.len() != matrix.num_rows() as usize || col_exclusion.len() != matrix.num_cols() as usize {
+    fn transposed(&self) -> Matrix {
+        let mut result = Matrix::of(0.0, self.num_cols, self.num_rows);
+        for i in 0..self.num_rows {
+            for j in 0..self.num_cols {
+                *result.get_mut(j, i) = self.get(i, j);
+            }
+        }
+        result
+    }
+
+    fn without_row(&self, i: u16) -> Matrix {
+        let mut result = self.clone();
+        result.del_row(i);
+        result
+    }
+
+    fn without_col(&self, j: u16) -> Matrix {
+        let mut result = self.clone();
+        result.del_col(j);
+        result
+    }
+
+    pub fn scale(&mut self, factor: f64) {
+        for entry in &mut self.entries {
+            *entry *= factor;
+        }
+    }
+
+    pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> Matrix {
+        if row_exclusion.len() != self.num_rows() as usize || col_exclusion.len() != self.num_cols() as usize {
             panic!("Row and column exclusions must match matrix dimensions.");
         }
 
-        let m = matrix.num_rows() - row_exclusion.iter().filter(|b| **b).count() as u16;
-        let n = matrix.num_cols() - col_exclusion.iter().filter(|b| **b).count() as u16;
+        let m = self.num_rows() - row_exclusion.iter().filter(|b| **b).count() as u16;
+        let n = self.num_cols() - col_exclusion.iter().filter(|b| **b).count() as u16;
         let mut result = Matrix::of(0.0, m, n);
-        let mut i_r = 0;
-        let mut j_r = 0;
 
-        for i in 0..matrix.num_rows() {
+        let mut i_r = 0;
+        for i in 0..self.num_rows() {
             if !row_exclusion.get(i as usize).unwrap() {
-                for j in 0..matrix.num_cols() {
+                let mut j_r = 0;
+                for j in 0..self.num_cols() {
                     if !col_exclusion.get(j as usize).unwrap() {
-                        *result.get_mut(i_r, j_r) = matrix.get(i, j);
+                        *result.get_mut(i_r, j_r) = self.get(i, j);
                         j_r += 1;
                     }
                 }
@@ -146,6 +201,10 @@ impl Matrix {
         }
 
         result
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.num_rows == 0 || self.num_cols == 0
     }
 
     pub const fn num_rows(&self) -> u16 {
@@ -191,31 +250,71 @@ impl Matrix {
             }
         }
     }
+
+    pub fn del_row(&mut self, i: u16) {
+        let del_from = self.flat_index(i, 0);
+        let del_to = self.flat_index(i, self.num_cols - 1);
+        self.entries.drain(del_from..=del_to);
+        self.num_rows -= 1;
+    }
+
+    pub fn del_col(&mut self, j: u16) {
+        let del_from = self.flat_index(0, j) as isize;
+        let del_to = self.flat_index(self.num_rows - 1, j) as isize;
+        let mut del_index = del_to;
+        while del_index >= del_from {
+            self.entries.remove(del_index as usize);
+            del_index -= self.num_cols as isize;
+        }
+        self.num_cols -= 1;
+    }
 }
 
-fn pivot(tableau: &mut Matrix, pivot_row: u16, pivot_col: u16, basis: &mut [bool]) {
-    *basis.get_mut(pivot_col as usize).unwrap() = true;
-    let pivot = tableau.get(pivot_row, pivot_col);
-    for j in 0..(tableau.num_cols - 1) {
-        if !almost::zero(tableau.get(pivot_row, j)) {
-            *basis.get_mut(j as usize).unwrap() = false;
+impl Display for Matrix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        let mut formatted = String::from("");
+        self.entries.chunks(self.num_cols as usize).for_each(|row| {
+            formatted.push_str(&format!("{:?}", row));
+            formatted.push('\n');
+        });
+        write!(f, "{}", formatted)
+    }
+}
+
+pub fn pivot_with_basis(tableau: &mut Matrix, pivot_row: u16, pivot_col: u16, basis: &mut [bool]) {
+    if *basis.get(pivot_col as usize).unwrap() { return; }
+
+    let mut exiting_var = 0;
+    for j in 0..(tableau.num_cols() - 1) {
+        if *basis.get(j as usize).unwrap() && !almost::zero(tableau.get(pivot_row, j)) {
+            exiting_var = j as usize;
             break;
         }
     }
+    *basis.get_mut(exiting_var).unwrap() = false;
+    *basis.get_mut(pivot_col as usize).unwrap() = true;
+
+    pivot(tableau, pivot_row, pivot_col);
+}
+
+fn pivot(tableau: &mut Matrix, pivot_row: u16, pivot_col: u16) {
+    let pivot = tableau.get(pivot_row, pivot_col);
+    for j in 0..tableau.num_cols {
+        *tableau.get_mut(pivot_row, j) /= pivot;
+    }
     for i in 0..tableau.num_rows {
-        if i == pivot_row {
-            for j in 0..tableau.num_cols {
-                *tableau.get_mut(i, j) /= pivot;
-            }
-        } else if !almost::zero(tableau.get(i, pivot_col)) {
-            for j in 0..tableau.num_cols {
-                *tableau.get_mut(i, j) = tableau.get(i, j) / tableau.get(i, pivot_col) - tableau.get(pivot_row, j) / pivot;
+        if i != pivot_row {
+            let tableau_i_pivot_col = tableau.get(i, pivot_col);
+            if !almost::zero(tableau_i_pivot_col) {
+                for j in 0..tableau.num_cols {
+                    *tableau.get_mut(i, j) = tableau.get(i, j) - tableau.get(pivot_row, j) * tableau_i_pivot_col
+                }
             }
         }
     }
 }
 
-fn select_pivot_col(tableau: &Matrix, basis: &[bool]) -> Option<u16> {
+pub fn select_pivot_col(tableau: &Matrix, basis: &[bool]) -> Option<u16> {
     if basis.len() != tableau.num_cols as usize - 1 {
         panic!("Number of basis labels should equal number of tableau columns - 1");
     }
@@ -228,14 +327,14 @@ fn select_pivot_col(tableau: &Matrix, basis: &[bool]) -> Option<u16> {
             pivot_col = Some(j);
         }
     }
-    if min_obj_coeff > 0.0 { None } else { pivot_col }
+    if almost::zero(min_obj_coeff) || min_obj_coeff > 0.0 { None } else { pivot_col }
 }
 
-fn select_pivot_row(tableau: &Matrix, pivot_col: u16) -> u16 {
-    let mut pivot_row = 1;
-    let mut min_ratio = tableau.get(1, tableau.num_cols - 1) / tableau.get(1, pivot_col);
-    for i in 2..tableau.num_rows {
-        if tableau.get(i, pivot_col) > 1e-12 {
+pub fn select_pivot_row(tableau: &Matrix, pivot_col: u16, min_row: u16) -> u16 {
+    let mut pivot_row = min_row;
+    let mut min_ratio = f64::INFINITY;
+    for i in min_row..tableau.num_rows {
+        if tableau.get(i, pivot_col) > 0.0 && !almost::zero(tableau.get(i, pivot_col)) {
             let ratio = tableau.get(i, tableau.num_cols - 1) / tableau.get(i, pivot_col);
             if ratio < min_ratio {
                 min_ratio = ratio;
@@ -246,186 +345,166 @@ fn select_pivot_row(tableau: &Matrix, pivot_col: u16) -> u16 {
     pivot_row
 }
 
-fn simplex_phase1(tableau: &mut Matrix, num_unknowns: u16, basis: &mut [bool]) -> Option<(Matrix, Vec<bool>)> {
+pub fn simplex_phase2(tableau: &mut Matrix, basis: &mut [bool]) {
     if basis.len() != tableau.num_cols() as usize - 1 {
         panic!("Number of basis labels should equal number of tableau columns - 1");
     }
 
-    // Also the number of artificial variables.
-    let num_slack_vars = tableau.num_rows() - 3;
+    while let Some(pivot_col) = select_pivot_col(tableau, basis) {
+        let pivot_row = select_pivot_row(tableau, pivot_col, 1);
+        println!("{}, {}", pivot_row, pivot_col);
+        pivot_with_basis(tableau, pivot_row, pivot_col, basis);
+    }
+}
+
+pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<(Matrix, Vec<bool>)> {
+    let m = a.num_rows();
+    let n = a.num_cols();
+
+    // Create a tableau representing the LP with slack variables and artificial variables.
+    let mut tableau = Matrix::of(0.0, m + 3, n + 2 * m + 2);
+    let mut basis = vec![false; tableau.num_cols() as usize - 1];
+
+    for j in 0..n {
+        *tableau.get_mut(1, j) = -*c.get(j as usize).unwrap();
+        *tableau.get_mut(1, tableau.num_rows() - 1) = 1.0;
+        for i in 0..m {
+            *tableau.get_mut(i + 2, j) = a.get(i, j);
+        }
+    }
+    for i in 0..m {
+        *tableau.get_mut(i + 2, tableau.num_cols() - 1) = *b.get(i as usize).unwrap();
+    }
+    for j in 0..m {
+        *tableau.get_mut(j + 2, j + n) = 1.0;
+        *basis.get_mut((j + n) as usize).unwrap() = true;
+        *tableau.get_mut(0, j + n + m) = 1.0;
+        *tableau.get_mut(j + 2, j + n + m) = if tableau.get(j + 2, tableau.num_cols() - 1) < 0.0 { -1.0 } else { 1.0 };
+    }
+    *tableau.get_mut(0, tableau.num_cols() - 2) = 1.0;
+    *tableau.get_mut(tableau.num_rows() - 1, tableau.num_cols() - 2) = 1.0;
+    *tableau.get_mut(tableau.num_rows() - 1, tableau.num_cols() - 1) = 1.0;
+
+    print!("tableau:\n{}", tableau);
+    println!("basis: {:?}\n", basis);
 
     // Pivot once on each artificial variable column.
-    for i in 2..(2 + num_slack_vars) {
-        pivot(tableau, i, i + num_unknowns + num_slack_vars, basis);
+    for i in 0..(m + 1) {
+        pivot_with_basis(&mut tableau, i + 2, i + n + m, &mut basis);
     }
 
+    print!("arti:\n{}", tableau);
+    println!("basis: {:?}\n", basis);
+
     // Pivot normally until an optimum is reached.
-    while let Some(pivot_col) = select_pivot_col(tableau, basis) {
-        let pivot_row = select_pivot_row(tableau, pivot_col);
-        pivot(tableau, pivot_row, pivot_col, basis);
+    while let Some(pivot_col) = select_pivot_col(&mut tableau, &mut basis) {
+        let pivot_row = select_pivot_row(&mut tableau, pivot_col, 2);
+        println!("{}, {}", pivot_row, pivot_col);
+        pivot_with_basis(&mut tableau, pivot_row, pivot_col, &mut basis);
     }
+
+    print!("optimum:\n{}", tableau);
+    println!("basis: {:?}\n", basis);
 
     // If the artificial variables are not zero by now, the original LP is infeasible.
     if !almost::zero(tableau.get(0, tableau.num_cols() - 1)) {
         return None;
     }
 
-    // Drop the artificial variables, creating a new canonical tableau equivalent to the original LP.
-    let mut canonical_tableau = Matrix::of(0.0, tableau.num_rows() - 1, tableau.num_cols() - 1 - num_slack_vars);
-    let mut canonical_basis = vec![false; canonical_tableau.num_cols() as usize - 1];
-    for i in 0..canonical_tableau.num_rows() {
-        for j in 0..(1 + num_unknowns + num_slack_vars) {
-            *canonical_tableau.get_mut(i, j) = tableau.get(i + 1, j + 1);
-            *canonical_basis.get_mut(j as usize).unwrap() = *basis.get(j as usize + 1).unwrap()
+    // Check that all the artificial variables are non-basic.
+    for j in 0..(m + 1) {
+        if *basis.get((j + n + m) as usize).unwrap() {
+            let mut pivot_row = 1;
+            for possible_i in 2..tableau.num_rows() {
+                if !almost::zero(tableau.get(pivot_row, j + n + m)) {
+                    pivot_row = possible_i;
+                }
+            }
+            // Pivot on some other non-basic variable with a positive entry in the pivot row.
+            let mut pivoted = false;
+            for pivot_col in 0..(n + m) {
+                if !*basis.get(pivot_col as usize).unwrap() {
+                    let potential_pivot = tableau.get(pivot_row, pivot_col);
+                    if !almost::zero(potential_pivot) && potential_pivot > 0.0 {
+                        pivot_with_basis(&mut tableau, pivot_row, pivot_col, &mut basis);
+                        pivoted = true;
+                        break;
+                    }
+                }
+            }
+            // If no such entry exists, the row is a redundant equation, so just delete it
+            // and the basic artificial variable.
+            if !pivoted {
+                tableau.del_row(pivot_row);
+                *basis.get_mut(j as usize).unwrap() = false;
+            }
         }
-        *canonical_tableau.get_mut(i, canonical_tableau.num_cols() - 1) = tableau.get(i + 1, tableau.num_cols() - 1);
     }
 
-    Some((canonical_tableau, canonical_basis))
-}
+    print!("dropping:\n{}", tableau);
+    println!("basis: {:?}\n", basis);
 
-fn simplex_phase2(tableau: &mut Matrix, basis: &mut [bool]) {
-    if basis.len() != tableau.num_cols() as usize - 1 {
-        panic!("Number of basis labels should equal number of tableau columns - 1");
+    // Drop the artificial variables, creating a canonical tableau equivalent to the original LP.
+    tableau.del_row(0);
+    for j in (0..(m + 1)).rev() {
+        tableau.del_col(j + n + m);
     }
 
-    while let Some(pivot_col) = select_pivot_col(tableau, basis) {
-        let pivot_row = select_pivot_row(tableau, pivot_col);
-        pivot(tableau, pivot_row, pivot_col, basis);
-    }
+    print!("tableau:\n{}", tableau);
+    println!("basis: {:?}\n", basis);
+
+    Some((tableau, basis))
 }
 
 pub fn alpha_child(a: u16, b: u16, pessimistic_bounds_wo_domination: &Matrix, optimistic_bounds_wo_domination: &Matrix, alpha: f64) -> f64 {
-    let m = pessimistic_bounds_wo_domination.num_rows(); // Also the number of unknowns
-    let n = pessimistic_bounds_wo_domination.num_cols();
-    let num_slack_vars = n - 1; // Also the number of artificial variables
+    let mut p_t = pessimistic_bounds_wo_domination.clone();
+    p_t.set_row(a, alpha);
+    let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.get(i, b)).collect();
+    p_t.del_col(b);
+    p_t = p_t.transposed();
+    p_t.scale(-1.0);
 
-    let mut tableau = Matrix::of(0.0, n + 2, 2 * num_slack_vars + m + 3);
-    *tableau.get_mut(0, 0) = 1.0;
-    *tableau.get_mut(1, 1) = 1.0;
-    *tableau.get_mut(1, m + 1) = -alpha;
-    *tableau.get_mut(n + 1, m + 1) = 1.0;
-    *tableau.get_mut(n + 1, 2 * num_slack_vars + m + 2) = 1.0;
+    let f: Vec<f64> = (0..optimistic_bounds_wo_domination.num_cols()).filter(|j| *j != b).map(|j| -optimistic_bounds_wo_domination.get(a, j)).collect();
 
-    for i in 0..m {
-        if i < a {
-            *tableau.get_mut(1, i + 2) = -pessimistic_bounds_wo_domination.get(i, b);
-            *tableau.get_mut(n + 1, i + 2) = 1.0;
-        } else if i > a {
-            *tableau.get_mut(1, i + 1) = -pessimistic_bounds_wo_domination.get(i, b);
-            *tableau.get_mut(n + 1, i + 1) = 1.0;
+    if let Some((mut tableau, mut basis)) = simplex_phase1(&p_t, &f, &e) {
+        simplex_phase2(&mut tableau, &mut basis);
+        print!("tableau:\n{}", tableau);
+        let mut alpha_child = tableau.get(0, tableau.num_cols() - 1);
+        if almost::equal(alpha_child, -1.0) {
+            alpha_child = -1.0;
+        } else if almost::equal(alpha_child, 1.0) {
+            alpha_child = 1.0;
         }
-    }
-
-    for j in 0..num_slack_vars {
-        *tableau.get_mut(0, 2 + m + num_slack_vars + j) = 1.0;
-        *tableau.get_mut(j + 2, 2 + m + num_slack_vars + j) = 1.0;
-    }
-
-    for j in 0..n {
-        if j < b {
-            for i in 0..m {
-                if i < a {
-                    *tableau.get_mut(j + 2, i + 2) = pessimistic_bounds_wo_domination.get(i, j);
-                } else if i > a {
-                    *tableau.get_mut(j + 2, i + 1) = pessimistic_bounds_wo_domination.get(i, j);
-                }
-            }
-            *tableau.get_mut(j + 2, m + 1) = alpha;
-            *tableau.get_mut(j + 2, m + 2 + j) = -1.0;
-            *tableau.get_mut(j + 2, 2 * num_slack_vars + m + 2) = optimistic_bounds_wo_domination.get(a, j);
-        } else if j > b {
-            for i in 0..m {
-                if i < a {
-                    *tableau.get_mut(j + 1, i + 2) = pessimistic_bounds_wo_domination.get(i, j);
-                } else if i > a {
-                    *tableau.get_mut(j + 1, i + 1) = pessimistic_bounds_wo_domination.get(i, j);
-                }
-            }
-            *tableau.get_mut(j + 1, m + 1) = alpha;
-            *tableau.get_mut(j + 1, m + 1 + j) = -1.0;
-            *tableau.get_mut(j + 1, 2 * num_slack_vars + m + 2) = optimistic_bounds_wo_domination.get(a, j);
+        if alpha_child < -1.0 || alpha_child > 1.0 {
+            panic!(format!("Alpha outside of bounds: {}", alpha_child));
         }
-    }
-
-    let mut basis = vec![false; tableau.num_cols() as usize - 1];
-    *basis.get_mut(0).unwrap() = true;
-    *basis.get_mut(1).unwrap() = true;
-    for j in (m as usize + 2)..(m + 2 + num_slack_vars) as usize {
-        *basis.get_mut(j).unwrap() = true;
-    }
-
-    if let Some((mut canonical_tableau, mut canonical_basis)) = simplex_phase1(&mut tableau, m, &mut basis) {
-        simplex_phase2(&mut canonical_tableau, &mut canonical_basis);
-        canonical_tableau.get(0, canonical_tableau.num_cols() - 1)
+        alpha_child
     } else {
         -1.0
     }
 }
 
 pub fn beta_child(a: u16, b: u16, pessimistic_bounds_wo_domination: &Matrix, optimistic_bounds_wo_domination: &Matrix, beta: f64) -> f64 {
-    let m = optimistic_bounds_wo_domination.num_rows();
-    let n = optimistic_bounds_wo_domination.num_cols(); // Also the number of unknowns
-    let num_slack_vars = m - 1; // Also the number of artificial variables
+    let mut o = optimistic_bounds_wo_domination.clone();
+    o.set_col(b, beta);
+    let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.get(a, j)).collect();
+    o.del_row(a);
 
-    let mut tableau = Matrix::of(0.0, m + 2, 2 * num_slack_vars + n + 3);
-    *tableau.get_mut(0, 0) = 1.0;
-    *tableau.get_mut(1, 1) = 1.0;
-    *tableau.get_mut(1, n + 1) = -beta;
-    *tableau.get_mut(m + 1, n + 1) = 1.0;
-    *tableau.get_mut(m + 1, 2 * num_slack_vars + n + 2) = 1.0;
+    let f: Vec<f64> = (0..pessimistic_bounds_wo_domination.num_rows()).filter(|i| *i != a).map(|i| pessimistic_bounds_wo_domination.get(i, b)).collect();
 
-    for j in 0..n {
-        if j < b {
-            *tableau.get_mut(1, j + 2) = -optimistic_bounds_wo_domination.get(a, j);
-            *tableau.get_mut(m + 1, j + 2) = 1.0;
-        } else if j > b {
-            *tableau.get_mut(1, j + 1) = -optimistic_bounds_wo_domination.get(a, j);
-            *tableau.get_mut(m + 1, j + 1) = 1.0;
+    if let Some((mut tableau, mut basis)) = simplex_phase1(&o, &f, &e) {
+        simplex_phase2(&mut tableau, &mut basis);
+        print!("tableau:\n{}", tableau);
+        let mut beta_child = -tableau.get(0, tableau.num_cols() - 1);
+        if almost::equal(beta_child, -1.0) {
+            beta_child = -1.0;
+        } else if almost::equal(beta_child, 1.0) {
+            beta_child = 1.0;
         }
-    }
-
-    for j in 0..num_slack_vars {
-        *tableau.get_mut(0, 2 + n + num_slack_vars + j) = 1.0;
-        *tableau.get_mut(j + 2, 2 + n + num_slack_vars + j) = -1.0;
-    }
-
-    for i in 0..m {
-        if i < a {
-            for j in 0..n {
-                if j < b {
-                    *tableau.get_mut(i + 2, j + 2) = optimistic_bounds_wo_domination.get(i, j);
-                } else if j > b {
-                    *tableau.get_mut(i + 2, j + 1) = optimistic_bounds_wo_domination.get(i, j);
-                }
-            }
-            *tableau.get_mut(i + 2, n + 1) = beta;
-            *tableau.get_mut(i + 2, n + 2 + i) = 1.0;
-            *tableau.get_mut(i + 2, 2 * num_slack_vars + n + 2) = pessimistic_bounds_wo_domination.get(i, b);
-        } else if i > a {
-            for j in 0..n {
-                if j < b {
-                    *tableau.get_mut(i + 1, j + 2) = optimistic_bounds_wo_domination.get(i, j);
-                } else if j > b {
-                    *tableau.get_mut(i + 1, j + 1) = optimistic_bounds_wo_domination.get(i, j);
-                }
-            }
-            *tableau.get_mut(i + 1, n + 1) = beta;
-            *tableau.get_mut(i + 1, n + 1 + i) = 1.0;
-            *tableau.get_mut(i + 1, 2 * num_slack_vars + n + 2) = pessimistic_bounds_wo_domination.get(i, b);
+        if beta_child < -1.0 || beta_child > 1.0 {
+            panic!(format!("Beta outside of bounds: {}", beta_child));
         }
-    }
-
-    let mut basis = vec![false; tableau.num_cols() as usize - 1];
-    *basis.get_mut(0).unwrap() = true;
-    *basis.get_mut(1).unwrap() = true;
-    for j in (n as usize + 2)..(n + 2 + num_slack_vars) as usize {
-        *basis.get_mut(j).unwrap() = true;
-    }
-
-    if let Some((mut canonical_tableau, mut canonical_basis)) = simplex_phase1(&mut tableau, n, &mut basis) {
-        simplex_phase2(&mut canonical_tableau, &mut canonical_basis);
-        -canonical_tableau.get(0, canonical_tableau.num_cols() - 1) // TODO: Should this be negative?
+        beta_child
     } else {
         1.0
     }

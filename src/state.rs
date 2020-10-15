@@ -6,8 +6,10 @@ use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, T
 use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
 use crate::game_theory::{ZeroSumNashEq, Matrix};
+use std::thread::sleep;
+use std::time::Duration;
 
-pub const AI_LEVEL: u8 = 3;
+pub const AI_LEVEL: u8 = 1;
 
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
@@ -91,6 +93,40 @@ pub fn run_battle(state: State) -> f64 {
         println!("<<<< BATTLE END >>>>");
     }
     heuristic_value(&state_box).expected_payoff
+}
+
+/// Run a battle from an initial state; the maximizer and minimizer use game theory to choose their actions. All
+/// state-space branching due to chance events during the course of each turn has been removed to reduce
+/// computational complexity. Instead, one potential outcome is simply chosen at random (weighted appropriately),
+/// so the agents behave as if they know the outcome ahead of time. Over many trials, the heuristic value should
+/// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
+/// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
+/// 0.0 would be a tie. The minimizer's value is its negation.
+pub fn run_battle_v2(state: State) -> f64 {
+    if cfg!(feature = "print-battle") {
+        println!("<<<< BATTLE BEGIN >>>>");
+        state.print_display_text();
+    }
+
+    let mut state_box = Box::new(state);
+    let mut nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL);
+    println!("Nash eq: {:?}", nash_eq);
+
+    while !state_box.children.is_empty() {
+        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy);
+        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy);
+
+        let child_index = maximizer_choice * state_box.num_minimizer_actions + minimizer_choice;
+        let child_box = state_box.children.remove(child_index);
+        state_box = child_box;
+        if cfg!(feature = "print-battle") { state_box.print_display_text(); }
+        nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL);
+    }
+
+    if cfg!(feature = "print-battle") {
+        println!("<<<< BATTLE END >>>>");
+    }
+    nash_eq.expected_payoff
 }
 
 /// Returns how many extra recursions should be done for the state's subtree.
@@ -246,7 +282,7 @@ fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
             state_box.children.iter().map(|child_box| heuristic_value(child_box).expected_payoff).collect(),
             state_box.num_maximizer_actions as u16,
             state_box.num_minimizer_actions as u16);
-        game_theory::calc_nash_eq(&payoff_matrix, 2.0)
+        game_theory::calc_nash_eq(&payoff_matrix, &vec![false; payoff_matrix.num_rows() as usize], &vec![false; payoff_matrix.num_cols() as usize], 2.0)
     }
 }
 
@@ -282,16 +318,23 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
     for i in 0..state_box.num_maximizer_actions {
         let mut b = 0;
         for j in 0..state_box.num_minimizer_actions {
+            println!("i: {}, j: {}, a: {}, b: {}", i, j, a, b);
             if !row_domination.get(i).unwrap() && !col_domination.get(j).unwrap() {
-                let pessimistic_bounds_wo_domination = Matrix::from_restricted_matrix(&pessimistic_bounds, &row_domination, &col_domination);
-                let optimistic_bounds_wo_domination = Matrix::from_restricted_matrix(&optimistic_bounds, &row_domination, &col_domination);
+                let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
+                let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
+                print!("pessimistic_bounds_wo_domination:\n{}", pessimistic_bounds_wo_domination);
+                print!("optimistic_bounds_wo_domination:\n{}", optimistic_bounds_wo_domination);
                 let alpha_child = game_theory::alpha_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
+                println!("alpha_child: {}", alpha_child);
                 let beta_child = game_theory::beta_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, beta);
+                println!("beta_child: {}\n", beta_child);
                 let child_index = i * state_box.num_minimizer_actions + j;
 
                 if alpha_child >= beta_child {
-                    const EPSILON: f64 = 1e-8; // TODO: How small should epsilon be?
+                    println!("\n[WARNING] alpha >= beta: {} >= {}\n", alpha_child, beta_child);
+                    const EPSILON: f64 = 0.0; // TODO: How small should epsilon be?
                     let value = smab_search(state_box.children.get_mut(child_index).unwrap(), alpha_child, alpha_child + EPSILON, recursions - 1).expected_payoff;
+                    println!("\n[VALUE]: {}\n", value);
                     if value <= alpha_child {
                         *row_domination.get_mut(i).unwrap() = true;
                     } else {
@@ -313,9 +356,28 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
         }
         if !row_domination.get(i).unwrap() { a += 1; }
     }
-
-    let pessimistic_bounds_wo_domination = Matrix::from_restricted_matrix(&pessimistic_bounds, &row_domination, &col_domination);
-    game_theory::calc_nash_eq(&pessimistic_bounds_wo_domination, 2.0)
+    println!("row_domination: {:?}", row_domination);
+    println!("col_domination: {:?}", col_domination);
+    print!("pessimistic_bounds:\n{}", pessimistic_bounds);
+    if row_domination.iter().all(|b| *b) {
+        println!("\n[WARNING] All rows dominated.\n");
+        sleep(Duration::from_secs(3));
+        ZeroSumNashEq {
+            max_player_strategy: Vec::new(),
+            min_player_strategy: Vec::new(),
+            expected_payoff: alpha
+        }
+    } else if col_domination.iter().all(|b| *b) {
+        println!("\n[WARNING] All columns dominated.\n");
+        sleep(Duration::from_secs(3));
+        ZeroSumNashEq {
+            max_player_strategy: Vec::new(),
+            min_player_strategy: Vec::new(),
+            expected_payoff: beta
+        }
+    } else {
+        game_theory::calc_nash_eq(&pessimistic_bounds, &row_domination, &col_domination, 2.0)
+    }
 }
 
 // TODO: Pass actions directly without using queues
