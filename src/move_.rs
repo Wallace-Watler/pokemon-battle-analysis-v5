@@ -6,6 +6,7 @@ use rand::Rng;
 use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, StatIndex, Type, clamp};
 use crate::pokemon::Pokemon;
 use crate::state::State;
+use rand::prelude::StdRng;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MoveCategory {
@@ -81,21 +82,20 @@ impl MoveAction {
      * @param otherAction - some other move action
      * @return Whether this move action should come before {@code otherAction} based on priority and the user's speed.
      */
-    pub fn outspeeds(&self, state_box: &Box<State>, other_action: &MoveAction) -> bool {
-        // TODO: Use seeded RNG
+    pub fn outspeeds(&self, state_box: &Box<State>, other_action: &MoveAction, rng: &mut StdRng) -> bool {
         if self.move_.priority_stage == other_action.move_.priority_stage {
             let this_spd = pokemon::calculated_stat(state_box, self.user_id, StatIndex::Spd);
             let other_spd = pokemon::calculated_stat(state_box, other_action.user_id, StatIndex::Spd);
-            if this_spd == other_spd { rand::thread_rng().gen_bool(0.5) } else { this_spd > other_spd }
+            if this_spd == other_spd { rng.gen_bool(0.5) } else { this_spd > other_spd }
         } else {
             self.move_.priority_stage > other_action.move_.priority_stage
         }
     }
 
-    pub fn can_be_performed(&self, state_box: &mut Box<State>) -> bool {
+    pub fn can_be_performed(&self, state_box: &mut Box<State>, rng: &mut StdRng) -> bool {
         let user_msa = state_box.pokemon[self.user_id as usize].major_status_ailment();
         // TODO: Use seeded RNG
-        if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rand::thread_rng().gen_bool(0.25)) {
+        if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
             if cfg!(feature = "print-battle") {
                 let user_display_text = format!("{}", &state_box.pokemon[self.user_id as usize]);
                 state_box.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
@@ -107,7 +107,7 @@ impl MoveAction {
         if user.current_hp == 0 || user.field_position == None { return false; }
         match self.move_index {
             Some(move_index) => {
-                let move_instance = user.known_moves.get(move_index as usize).unwrap();
+                let move_instance = &user.known_moves[move_index as usize];
                 move_instance.pp > 0 && !move_instance.disabled
             }
             None => true
@@ -119,9 +119,9 @@ impl MoveAction {
         pokemon::increment_msa_counter(state_box, self.user_id);
     }
 
-    pub fn perform(&self, state_box: &mut Box<State>, move_action_queue: &[&MoveAction]) -> bool {
+    pub fn perform(&self, state_box: &mut Box<State>, move_action_queue: &[&MoveAction], rng: &mut StdRng) -> bool {
         if let Some(move_index) = self.move_index {
-            state_box.pokemon[self.user_id as usize].known_moves.get_mut(move_index as usize).unwrap().pp -= 1;
+            state_box.pokemon[self.user_id as usize].known_moves[move_index as usize].pp -= 1;
         }
 
         if cfg!(feature = "print-battle") {
@@ -143,7 +143,7 @@ impl MoveAction {
                         state_box.display_text.push(format!("- {}", target_display_text));
                     }
 
-                    if (self.move_.effect)(state_box, move_action_queue, self.user_id, target_id) {
+                    if (self.move_.effect)(state_box, move_action_queue, self.user_id, target_id, rng) {
                         return true;
                     }
                 }
@@ -176,7 +176,7 @@ pub struct Move {
     pub max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&mut Box<State>, &[&MoveAction], u8, u8) -> bool,
+    effect: fn(&mut Box<State>, &[&MoveAction], u8, u8, &mut StdRng) -> bool,
 }
 
 impl Debug for Move {
@@ -298,9 +298,9 @@ fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(3, 3 + stat_stage) as f64 / max(3, 3 - stat_stage) as f64
 }
 
-fn std_accuracy_check(user: &Pokemon, target: &Pokemon, accuracy: u8) -> bool {
+fn std_accuracy_check(user: &Pokemon, target: &Pokemon, accuracy: u8, rng: &mut StdRng) -> bool {
     // TODO: Use seeded RNG
-    rand::thread_rng().gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
+    rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
 }
 
 fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
@@ -309,8 +309,8 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
     (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
-fn growl(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
-    if !std_accuracy_check(&state_box.pokemon[user_id as usize], &state_box.pokemon[target_id as usize], 100) {
+fn growl(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    if !std_accuracy_check(&state_box.pokemon[user_id as usize], &state_box.pokemon[target_id as usize], 100, rng) {
         if cfg!(feature = "print-battle") {
             let target_name = state_box.pokemon[target_id as usize].species.name;
             state_box.display_text.push(format!("{} avoided the attack!", target_name));
@@ -322,13 +322,13 @@ fn growl(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, t
     false
 }
 
-fn leech_seed(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+fn leech_seed(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_is_grass_type;
     {
         let user = &state_box.pokemon[user_id as usize];
         let target = &state_box.pokemon[target_id as usize];
-        accuracy_check = std_accuracy_check(user, target, 90);
+        accuracy_check = std_accuracy_check(user, target, 90, rng);
         target_is_grass_type = target.is_type(Type::Grass);
     }
 
@@ -366,7 +366,7 @@ fn leech_seed(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: 
     false
 }
 
-fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -378,7 +378,7 @@ fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8
     {
         let user = &state_box.pokemon[user_id as usize];
         let target = &state_box.pokemon[target_id as usize];
-        accuracy_check = game_version().gen() >= 4 || std_accuracy_check(user, target, 100);
+        accuracy_check = game_version().gen() >= 4 || std_accuracy_check(user, target, 100, rng);
         offensive_stat_stage = user.stat_stage(offensive_stat_index);
         defensive_stat_stage = target.stat_stage(defensive_stat_index);
         user_max_hp = user.max_hp;
@@ -408,8 +408,7 @@ fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8
      - damage = max(damage, 1)
      */
 
-    // TODO: Use seeded RNG
-    let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
+    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
         if cfg!(feature = "print-battle") {
             state_box.display_text.push(String::from("It's a critical hit!"));
         }
@@ -418,7 +417,7 @@ fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8
         std_base_damage(50, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
     };
 
-    modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
+    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
     if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
     modified_damage = modified_damage.max(1.0);
 
@@ -441,7 +440,7 @@ fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8
     pokemon::apply_damage(state_box, user_id, recoil_damage)
 }
 
-fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;
@@ -454,7 +453,7 @@ fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, 
     {
         let user = &state_box.pokemon[user_id as usize];
         let target = &state_box.pokemon[target_id as usize];
-        accuracy_check = std_accuracy_check(user, target, if game_version().gen() <= 4 { 95 } else { 100 });
+        accuracy_check = std_accuracy_check(user, target, if game_version().gen() <= 4 { 95 } else { 100 }, rng);
         target_first_type = target.first_type;
         target_second_type = target.second_type;
         offensive_stat_stage = user.stat_stage(offensive_stat_index);
@@ -495,13 +494,12 @@ fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, 
      - damage = max(damage, 1)
      */
 
-    // TODO: Use seeded RNG
     let move_power = match game_version().gen() {
         1..=4 => 35,
         5..=6 => 50,
         _ => 40
     };
-    let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
+    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
         if cfg!(feature = "print-battle") {
             state_box.display_text.push(String::from("It's a critical hit!"));
         }
@@ -510,7 +508,7 @@ fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, 
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
     };
 
-    modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
+    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
     if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
@@ -527,7 +525,7 @@ fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, 
     pokemon::apply_damage(state_box, target_id, modified_damage.round() as i16)
 }
 
-fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8) -> bool {
+fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;
@@ -540,7 +538,7 @@ fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u
     {
         let user = &state_box.pokemon[user_id as usize];
         let target = &state_box.pokemon[target_id as usize];
-        accuracy_check = std_accuracy_check(user, target, 100);
+        accuracy_check = std_accuracy_check(user, target, 100, rng);
         target_first_type = target.first_type;
         target_second_type = target.second_type;
         offensive_stat_stage = user.stat_stage(offensive_stat_index);
@@ -586,9 +584,8 @@ fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u
      - damage = max(damage, 1)
      */
 
-    // TODO: Use seeded RNG
     let move_power = if game_version().gen() <= 5 { 35 } else { 45 };
-    let mut modified_damage: f64 = if rand::thread_rng().gen_bool(critical_hit_chance(0)) {
+    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
         if cfg!(feature = "print-battle") {
             state_box.display_text.push(String::from("It's a critical hit!"));
         }
@@ -597,7 +594,7 @@ fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u
         std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
     };
 
-    modified_damage *= (100 - rand::thread_rng().gen_range(0, 16)) as f64 / 100.0;
+    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
     if damage_type != Type::None && state_box.pokemon[user_id as usize].is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;

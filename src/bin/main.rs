@@ -6,6 +6,8 @@ use pokemon_battle_analysis_v5::move_;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
 use pokemon_battle_analysis_v5::species;
 use pokemon_battle_analysis_v5::state::State;
+use rand::SeedableRng;
+use rand::prelude::StdRng;
 
 // #[cfg(not(target_env = "msvc"))]
 // #[global_allocator]
@@ -26,7 +28,9 @@ fn main() {
         species::initialize_species();
     }
 
-    let bulbasaur_config = PokemonConfig::new();
+    let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
+
+    let bulbasaur_config = PokemonConfig::new(&mut rng);
 
     let test_pokemon = [
         Box::new(bulbasaur_config.create_pokemon()),
@@ -56,5 +60,5 @@ fn main() {
         num_minimizer_actions: 0
     };
 
-    state::run_battle_v2(test_state());
+    state::run_battle_v2(test_state(), &mut rng);
 }

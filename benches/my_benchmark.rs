@@ -3,6 +3,8 @@ use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
 use pokemon_battle_analysis_v5::state::State;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
 use pokemon_battle_analysis_v5::game_theory::Matrix;
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 
 fn ai_benchmark(c: &mut Criterion) {
     unsafe {
@@ -11,7 +13,9 @@ fn ai_benchmark(c: &mut Criterion) {
         species::initialize_species();
     }
 
-    let bulbasaur_config = PokemonConfig::new();
+    let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
+
+    let bulbasaur_config = PokemonConfig::new(&mut rng);
     let test_pokemon = [
         Box::new(bulbasaur_config.create_pokemon()),
         Box::new(bulbasaur_config.create_pokemon()),
@@ -41,7 +45,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state())));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state(), &mut rng)));
 }
 
 criterion_group!{

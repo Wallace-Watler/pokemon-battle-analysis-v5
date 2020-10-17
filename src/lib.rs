@@ -5,6 +5,7 @@ use std::intrinsics::transmute;
 use rand::Rng;
 
 use crate::move_::MoveCategory;
+use rand::prelude::StdRng;
 
 pub mod game_theory;
 pub mod move_;
@@ -22,15 +23,14 @@ fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
     if i < min { min } else if i > max { max } else { i }
 }
 
-fn choose_weighted_index(weights: &[f64]) -> usize {
+fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
     if weights.is_empty() || weights.iter().any(|d| !almost::zero(*d) && *d < 0.0) {
         panic!(format!("Weights must be non-negative. Given weights: {:?}", weights));
     }
 
-    // TODO: Use seeded RNG
-    let mut d = rand::thread_rng().gen_range::<f64, f64, f64>(0.0, weights.iter().sum());
+    let mut d = rng.gen_range::<f64, f64, f64>(0.0, weights.iter().sum());
     for i in 0..weights.len() {
-        let w = *weights.get(i).unwrap();
+        let w = weights[i];
         if d < w { return i; }
         d -= w;
     }
@@ -320,10 +320,9 @@ pub enum Nature {
 }
 
 impl Nature {
-    pub fn random_nature() -> Nature {
+    pub fn random_nature(rng: &mut StdRng) -> Nature {
         unsafe {
-            // TODO: Use seeded RNG
-            transmute(rand::thread_rng().gen_range::<u8, u8, u8>(0, 25))
+            transmute(rng.gen_range::<u8, u8, u8>(0, 25))
         }
     }
 

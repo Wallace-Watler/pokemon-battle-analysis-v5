@@ -3,6 +3,7 @@ use rand::Rng;
 use crate::{Ability, game_version, GameVersion, Gender, StatIndex, Type};
 use crate::move_::Move;
 use crate::move_;
+use rand::prelude::StdRng;
 
 #[derive(Debug, Default)]
 pub struct Species {
@@ -24,10 +25,9 @@ pub struct Species {
 }
 
 impl Species {
-    pub fn random_species() -> &'static Species {
+    pub fn random_species(rng: &mut StdRng) -> &'static Species {
         unsafe {
-            // TODO: Use seedable RNG
-            SPECIES.get_unchecked(rand::thread_rng().gen_range(0, SPECIES.len()))
+            SPECIES.get_unchecked(rng.gen_range(0, SPECIES.len()))
         }
     }
 
@@ -35,9 +35,8 @@ impl Species {
         self.base_stats[stat_index.as_usize()]
     }
 
-    // TODO: Use seedable RNG
-    pub fn random_gender(&self) -> Gender {
-        let i = rand::thread_rng().gen_range(0, 1000);
+    pub fn random_gender(&self, rng: &mut StdRng) -> Gender {
+        let i = rng.gen_range(0, 1000);
         if i < self.female_chance {
             Gender::Female
         } else if i < self.female_chance + self.male_chance {
@@ -47,24 +46,22 @@ impl Species {
         }
     }
 
-    // TODO: Use seedable RNG
-    pub fn random_ability(&self) -> Ability {
-        if self.second_ability != Ability::None && rand::thread_rng().gen_bool(0.5) {
+    pub fn random_ability(&self, rng: &mut StdRng) -> Ability {
+        if self.second_ability != Ability::None && rng.gen_bool(0.5) {
             self.second_ability
         } else {
             self.first_ability
         }
     }
 
-    // TODO: Use seedable RNG
-    pub fn random_move_set(&self) -> Vec<&'static Move> {
+    pub fn random_move_set(&self, rng: &mut StdRng) -> Vec<&'static Move> {
         if self.move_pool.len() <= 4 { return self.move_pool.clone(); }
 
         let mut moves: Vec<&'static Move> = vec![];
         while moves.len() < 4 {
-            let random_choice = self.move_pool.get(rand::thread_rng().gen_range(0, self.move_pool.len())).unwrap();
-            if !moves.contains(random_choice) {
-                moves.push(*random_choice);
+            let random_choice = self.move_pool[rng.gen_range(0, self.move_pool.len())];
+            if !moves.contains(&random_choice) {
+                moves.push(random_choice);
             }
         }
         moves

@@ -90,7 +90,7 @@ impl Pokemon {
         if self.current_hp == 0 || self.field_position == None { return false; }
         match move_index {
             Some(move_index) => {
-                let move_instance = self.known_moves.get(move_index).unwrap();
+                let move_instance = &self.known_moves[move_index];
                 move_instance.pp > 0 && !move_instance.disabled
             }
             None => true

@@ -6,6 +6,7 @@ use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, T
 use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
 use crate::game_theory::{ZeroSumNashEq, Matrix, IsMatrix};
+use rand::prelude::StdRng;
 
 pub const AI_LEVEL: u8 = 2;
 
@@ -63,7 +64,7 @@ impl State {
 /// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle(state: State) -> f64 {
+pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -71,12 +72,12 @@ pub fn run_battle(state: State) -> f64 {
 
     let mut state_box = Box::new(state);
 
-    build_state_tree(&mut state_box, AI_LEVEL);
+    build_state_tree(&mut state_box, AI_LEVEL, rng);
 
     while !state_box.children.is_empty() {
         let nash_eq = heuristic_value(&state_box);
-        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy);
-        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy);
+        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
+        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
 
         let child_index = maximizer_choice * state_box.num_minimizer_actions + minimizer_choice;
         let child_box = state_box.children.remove(child_index);
@@ -84,7 +85,7 @@ pub fn run_battle(state: State) -> f64 {
         if cfg!(feature = "print-battle") {
             state_box.print_display_text();
         }
-        build_state_tree(&mut state_box, AI_LEVEL);
+        build_state_tree(&mut state_box, AI_LEVEL, rng);
     }
 
     if cfg!(feature = "print-battle") {
@@ -100,25 +101,25 @@ pub fn run_battle(state: State) -> f64 {
 /// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle_v2(state: State) -> f64 {
+pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
     }
 
     let mut state_box = Box::new(state);
-    let mut nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL);
+    let mut nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL, rng);
     println!("Nash eq: {:?}", nash_eq);
 
     while !state_box.children.is_empty() {
-        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy);
-        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy);
+        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
+        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
 
         let child_index = maximizer_choice * state_box.num_minimizer_actions + minimizer_choice;
         let child_box = state_box.children.remove(child_index);
         state_box = child_box;
         if cfg!(feature = "print-battle") { state_box.print_display_text(); }
-        nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL);
+        nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL, rng);
     }
 
     if cfg!(feature = "print-battle") {
@@ -128,7 +129,7 @@ pub fn run_battle_v2(state: State) -> f64 {
 }
 
 /// Returns how many extra recursions should be done for the state's subtree.
-fn generate_immediate_children(state_box: &mut Box<State>) -> u8 {
+fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> u8 {
     match state_box.min_pokemon_id.zip(state_box.max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
             match state_box.min_pokemon_id.xor(state_box.max_pokemon_id) {
@@ -188,7 +189,7 @@ fn generate_immediate_children(state_box: &mut Box<State>) -> u8 {
                 let mut user_actions: Vec<MoveAction> = Vec::with_capacity(4);
 
                 if let Some(next_move_action) = state_box.pokemon[user_id as usize].next_move_action.clone() { // TODO: Is this actually what should happen?
-                    if next_move_action.can_be_performed(state_box) {
+                    if next_move_action.can_be_performed(state_box, rng) {
                         user_actions.push(next_move_action);
                         state_box.pokemon[user_id as usize].next_move_action = None;
                         return user_actions;
@@ -200,7 +201,7 @@ fn generate_immediate_children(state_box: &mut Box<State>) -> u8 {
                 let user = &state_box.pokemon[user_id as usize];
                 for move_index in 0..user.known_moves.len() {
                     if user.can_choose_move(Some(move_index)) {
-                        let move_ = user.known_moves.get(move_index).unwrap().move_;
+                        let move_ = user.known_moves[move_index].move_;
                         user_actions.push(MoveAction {
                             user_id,
                             move_,
@@ -241,7 +242,7 @@ fn generate_immediate_children(state_box: &mut Box<State>) -> u8 {
             for maximizer_choice in 0..maximizer_move_actions.len() {
                 for minimizer_choice in 0..minimizer_move_actions.len() {
                     let mut child_box = Box::new(state_box.copy_game_state());
-                    play_out_turn(&mut child_box, vec![minimizer_move_actions.get(minimizer_choice).unwrap(), maximizer_move_actions.get(maximizer_choice).unwrap()]);
+                    play_out_turn(&mut child_box, vec![&minimizer_move_actions[minimizer_choice], &maximizer_move_actions[maximizer_choice]], rng);
                     state_box.children.push(child_box);
                 }
             }
@@ -253,16 +254,16 @@ fn generate_immediate_children(state_box: &mut Box<State>) -> u8 {
     }
 }
 
-fn build_state_tree(root: &mut Box<State>, mut recursions: u8) {
+fn build_state_tree(root: &mut Box<State>, mut recursions: u8, rng: &mut StdRng) {
     if recursions < 1 { return; }
 
     if root.children.is_empty() {
-        recursions += generate_immediate_children(root);
+        recursions += generate_immediate_children(root, rng);
     }
 
     // If children is still empty, battle has ended
     for child_box in &mut root.children {
-        build_state_tree(child_box, recursions - 1);
+        build_state_tree(child_box, recursions - 1, rng);
     }
 }
 
@@ -287,7 +288,7 @@ fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
 /// Simultaneous move alpha-beta search, implemented as per
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 // TODO: Order moves/children so that pruning is most likely to occur
-fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions: u8) -> ZeroSumNashEq {
+fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
     if recursions < 1 {
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
@@ -298,9 +299,9 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
     }
 
     if state_box.children.is_empty() {
-        recursions += generate_immediate_children(state_box);
+        recursions += generate_immediate_children(state_box, rng);
         if state_box.children.is_empty() { // If children is still empty, battle has ended.
-            return smab_search(state_box, alpha, beta, 0);
+            return smab_search(state_box, alpha, beta, 0, rng);
         }
     }
 
@@ -316,7 +317,7 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
     for i in 0..state_box.num_maximizer_actions {
         let mut b = 0;
         for j in 0..state_box.num_minimizer_actions {
-            if !row_domination.get(i).unwrap() && !col_domination.get(j).unwrap() {
+            if !row_domination[i] && !col_domination[j] {
                 let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
                 let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
                 let alpha_child = game_theory::alpha_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
@@ -325,27 +326,27 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
 
                 if alpha_child >= beta_child {
                     const EPSILON: f64 = 0.0; // TODO: How small should epsilon be?
-                    let value = smab_search(state_box.children.get_mut(child_index).unwrap(), alpha_child, alpha_child + EPSILON, recursions - 1).expected_payoff;
+                    let value = smab_search(&mut state_box.children[child_index], alpha_child, alpha_child + EPSILON, recursions - 1, rng).expected_payoff;
                     if value <= alpha_child {
-                        *row_domination.get_mut(i).unwrap() = true;
+                        row_domination[i] = true;
                     } else {
-                        *col_domination.get_mut(j).unwrap() = true;
+                        col_domination[j] = true;
                     }
                 } else {
-                    let value = smab_search(state_box.children.get_mut(child_index).unwrap(), alpha_child, beta_child, recursions - 1).expected_payoff;
+                    let value = smab_search(&mut state_box.children[child_index], alpha_child, beta_child, recursions - 1, rng).expected_payoff;
                     if value <= alpha_child {
-                        *row_domination.get_mut(i).unwrap() = true;
+                        row_domination[i] = true;
                     } else if value >= beta_child {
-                        *col_domination.get_mut(j).unwrap() = true;
+                        col_domination[j] = true;
                     } else {
                         *pessimistic_bounds.get_mut(i, j) = value;
                         *optimistic_bounds.get_mut(i, j) = value;
                     }
                 }
             }
-            if !col_domination.get(j).unwrap() { b += 1; }
+            if !col_domination[j] { b += 1; }
         }
-        if !row_domination.get(i).unwrap() { a += 1; }
+        if !row_domination[i] { a += 1; }
     }
 
     if row_domination.iter().all(|b| *b) {
@@ -366,29 +367,26 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
 }
 
 // TODO: Pass actions directly without using queues
-fn play_out_turn(state_box: &mut Box<State>, mut move_action_queue: Vec<&MoveAction>) {
+fn play_out_turn(state_box: &mut Box<State>, mut move_action_queue: Vec<&MoveAction>, rng: &mut StdRng) {
     let turn_number = state_box.turn_number;
     if cfg!(feature = "print-battle") {
         state_box.display_text.push(format!("---- Turn {} ----", turn_number));
     }
 
-    unsafe {
-        if move_action_queue.len() == 2 && move_action_queue.get_unchecked(1).outspeeds(state_box, move_action_queue.get_unchecked(0)) {
-            move_action_queue.swap(0, 1);
-        }
+    if move_action_queue.len() == 2 && move_action_queue[1].outspeeds(state_box, move_action_queue[0], rng) {
+        move_action_queue.swap(0, 1);
     }
 
     while !move_action_queue.is_empty() {
         let move_action = move_action_queue.remove(0);
         move_action.pre_move_stuff(state_box);
-        if move_action.can_be_performed(state_box) && move_action.perform(state_box, &move_action_queue) {
+        if move_action.can_be_performed(state_box, rng) && move_action.perform(state_box, &move_action_queue, rng) {
             return;
         }
     }
 
-    // TODO: Use seeded RNG
     // End of turn effects (order is randomized to avoid bias)
-    let pokemon_ids = if rand::thread_rng().gen_bool(0.5) {
+    let pokemon_ids = if rng.gen_bool(0.5) {
         vec![state_box.min_pokemon_id, state_box.max_pokemon_id]
     } else {
         vec![state_box.max_pokemon_id, state_box.min_pokemon_id]

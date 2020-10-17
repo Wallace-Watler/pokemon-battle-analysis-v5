@@ -26,10 +26,10 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
 
     let mut i_t = 0;
     for i in 0..payoff_matrix.num_rows() {
-        if !row_domination.get(i as usize).unwrap() {
+        if !row_domination[i] {
             let mut j_t = 0;
             for j in 0..payoff_matrix.num_cols() {
-                if !col_domination.get(j as usize).unwrap() {
+                if !col_domination[j] {
                     *tableau.get_mut(i_t, j_t) = payoff_matrix.get(i, j) + added_constant;
                     j_t += 1;
                 }
@@ -62,7 +62,9 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
         }
         let mut p = 0; // Row to pivot on
         for possible_p in 0..m {
-            if tableau.get(possible_p, q) > 1e-12 && (tableau.get(possible_p, n) / tableau.get(possible_p, q) < tableau.get(p, n) / tableau.get(p, q) || tableau.get(p, q) <= 1e-12) {
+            let tppq = tableau.get(possible_p, q);
+            let tpq = tableau.get(p, q);
+            if !almost::zero(tppq) && tppq > 0.0 && (tableau.get(possible_p, n) / tppq < tableau.get(p, n) / tpq || almost::zero(tpq) || tpq < 0.0) {
                 p = possible_p;
             }
         }
@@ -83,35 +85,35 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
         *tableau.get_mut(p, q) = 1.0 / pivot;
 
         // Exchange labels appropriately
-        let temp = *left_labels.get(p as usize).unwrap();
-        *left_labels.get_mut(p as usize).unwrap() = *top_labels.get(q as usize).unwrap();
-        *top_labels.get_mut(q as usize).unwrap() = temp;
+        let temp = left_labels[p];
+        left_labels[p] = top_labels[q];
+        top_labels[q] = temp;
 
         negative_remaining = (0..n).any(|j| tableau.get(m, j) < 0.0);
     }
 
-    let mut max_player_strategy = vec![0.0; m as usize];
-    let mut min_player_strategy = vec![0.0; n as usize];
+    let mut max_player_strategy = vec![0.0; m];
+    let mut min_player_strategy = vec![0.0; n];
     for j in 0..n {
-        let top_label = *top_labels.get(j as usize).unwrap();
+        let top_label = top_labels[j];
         if top_label > 0 { // If it's one of row player's labels
-            *max_player_strategy.get_mut((top_label - 1) as usize).unwrap() = tableau.get(m, j) / tableau.get(m, n);
+            max_player_strategy[top_label as usize - 1] = tableau.get(m, j) / tableau.get(m, n);
         }
     }
     for i in 0..m {
-        let left_label = *left_labels.get(i as usize).unwrap();
+        let left_label = left_labels[i];
         if left_label < 0 { // If it's one of column player's labels
-            *min_player_strategy.get_mut((-left_label) as usize - 1).unwrap() = tableau.get(i, n) / tableau.get(m, n);
+            min_player_strategy[-left_label as usize - 1] = tableau.get(i, n) / tableau.get(m, n);
         }
     }
 
     for i in 0..row_domination.len() {
-        if *row_domination.get(i).unwrap() {
+        if row_domination[i] {
             max_player_strategy.insert(i, 0.0);
         }
     }
     for j in 0..col_domination.len() {
-        if *col_domination.get(j).unwrap() {
+        if col_domination[j] {
             min_player_strategy.insert(j, 0.0);
         }
     }
@@ -150,14 +152,14 @@ pub trait IsMatrix: Display {
     fn set_row(&mut self, i: usize, value: f64) {
         let flat_indices = (0..self.num_cols()).map(|j| self.flat_index(i, j)).collect::<Vec<usize>>();
         for flat_index in flat_indices {
-            *self.entries_mut().get_mut(flat_index).unwrap() = value;
+            self.entries_mut()[flat_index] = value;
         }
     }
 
     fn set_col(&mut self, j: usize, value: f64) {
         let flat_indices = (0..self.num_rows()).map(|i| self.flat_index(i, j)).collect::<Vec<usize>>();
         for flat_index in flat_indices {
-            *self.entries_mut().get_mut(flat_index).unwrap() = value;
+            self.entries_mut()[flat_index] = value;
         }
     }
 
@@ -229,7 +231,7 @@ impl Tableau {
     pub fn del_row(&mut self, i: usize) {
         self.matrix.del_row(i);
         if let Some(basis_col) = *self.basis_col().get(i).unwrap() {
-            *self.col_is_basis_mut().get_mut(basis_col).unwrap() = false;
+            self.col_is_basis_mut()[basis_col] = false;
         }
         self.basis_col.remove(i);
     }
@@ -317,9 +319,9 @@ impl Matrix {
     }
 
     fn transposed(&self) -> Matrix {
-        let mut result = Matrix::of(0.0, self.num_cols, self.num_rows);
-        for i in 0..self.num_rows {
-            for j in 0..self.num_cols {
+        let mut result = Matrix::of(0.0, self.num_cols(), self.num_rows());
+        for i in 0..self.num_rows() {
+            for j in 0..self.num_cols() {
                 *result.get_mut(j, i) = self.get(i, j);
             }
         }
@@ -349,10 +351,10 @@ impl Matrix {
 
         let mut i_r = 0;
         for i in 0..self.num_rows() {
-            if !row_exclusion.get(i).unwrap() {
+            if !row_exclusion[i] {
                 let mut j_r = 0;
                 for j in 0..self.num_cols() {
-                    if !col_exclusion.get(j).unwrap() {
+                    if !col_exclusion[j] {
                         *result.get_mut(i_r, j_r) = self.get(i, j);
                         j_r += 1;
                     }
@@ -411,39 +413,6 @@ impl Display for Matrix {
     }
 }
 
-pub fn pivot_with_basis(tableau: &mut Matrix, pivot_row: usize, pivot_col: usize, basis: &mut [bool]) {
-    if *basis.get(pivot_col).unwrap() { return; }
-
-    let mut exiting_var = 0;
-    for j in 0..(tableau.num_cols() - 1) {
-        if *basis.get(j).unwrap() && !almost::zero(tableau.get(pivot_row, j)) {
-            exiting_var = j;
-            break;
-        }
-    }
-    *basis.get_mut(exiting_var).unwrap() = false;
-    *basis.get_mut(pivot_col).unwrap() = true;
-
-    pivot(tableau, pivot_row, pivot_col);
-}
-
-fn pivot(tableau: &mut Matrix, pivot_row: usize, pivot_col: usize) {
-    let pivot = tableau.get(pivot_row, pivot_col);
-    for j in 0..tableau.num_cols {
-        *tableau.get_mut(pivot_row, j) /= pivot;
-    }
-    for i in 0..tableau.num_rows {
-        if i != pivot_row {
-            let tableau_i_pivot_col = tableau.get(i, pivot_col);
-            if !almost::zero(tableau_i_pivot_col) {
-                for j in 0..tableau.num_cols {
-                    *tableau.get_mut(i, j) = tableau.get(i, j) - tableau.get(pivot_row, j) * tableau_i_pivot_col
-                }
-            }
-        }
-    }
-}
-
 pub fn select_pivot_col(tableau: &Tableau) -> Option<usize> {
     let mut pivot_col = Some(0);
     let mut min_obj_coeff = tableau.get(0, 0);
@@ -489,19 +458,19 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     let mut basis_col = vec![None; matrix.num_rows()];
 
     for j in 0..n {
-        *matrix.get_mut(1, j) = -*c.get(j).unwrap();
+        *matrix.get_mut(1, j) = -c[j];
         *matrix.get_mut(matrix.num_rows() - 1, j) = 1.0;
         for i in 0..m {
             *matrix.get_mut(i + 2, j) = a.get(i, j);
         }
     }
     for i in 0..m {
-        *matrix.get_mut(i + 2, matrix.num_cols() - 1) = *b.get(i).unwrap();
+        *matrix.get_mut(i + 2, matrix.num_cols() - 1) = b[i];
     }
     for j in 0..m {
         *matrix.get_mut(j + 2, j + n) = 1.0;
-        *is_col_basis.get_mut(j + n).unwrap() = true;
-        *basis_col.get_mut(j + 2).unwrap() = Some(j + n);
+        is_col_basis[j + n] = true;
+        basis_col[j + 2] = Some(j + n);
         *matrix.get_mut(0, j + n + m) = 1.0;
         *matrix.get_mut(j + 2, j + n + m) = if matrix.get(j + 2, matrix.num_cols() - 1) < 0.0 { -1.0 } else { 1.0 };
     }
@@ -530,7 +499,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     // Check that all the artificial variables are non-basic.
     // TODO: Just check tableau.basis_col() for indices in the range (n + m)..(2 * m + 1 + n)
     for j in 0..(m + 1) {
-        if *tableau.col_is_basis().get(j + n + m).unwrap() {
+        if tableau.col_is_basis()[j + n + m] {
             let mut pivot_row = 1;
             for possible_i in 2..tableau.num_rows() {
                 if !almost::zero(tableau.get(pivot_row, j + n + m)) {
@@ -540,7 +509,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
             // Pivot on some other non-basic variable with a positive entry in the pivot row.
             let mut pivoted = false;
             for pivot_col in 0..(n + m) {
-                if !*tableau.col_is_basis().get(pivot_col).unwrap() {
+                if !tableau.col_is_basis()[pivot_col] {
                     let potential_pivot = tableau.get(pivot_row, pivot_col);
                     if !almost::zero(potential_pivot) && potential_pivot > 0.0 {
                         tableau.pivot(pivot_row, pivot_col);
@@ -553,7 +522,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
             // and the basic artificial variable.
             if !pivoted {
                 tableau.del_row(pivot_row);
-                *tableau.col_is_basis_mut().get_mut(j).unwrap() = false;
+                tableau.col_is_basis_mut()[j] = false;
             }
         }
     }
