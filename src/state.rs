@@ -109,7 +109,6 @@ pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
 
     let mut state_box = Box::new(state);
     let mut nash_eq = smab_search(&mut state_box, -1.0, 1.0, AI_LEVEL, rng);
-    println!("Nash eq: {:?}", nash_eq);
 
     while !state_box.children.is_empty() {
         let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
@@ -239,13 +238,14 @@ fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> 
             let minimizer_move_actions: Vec<MoveAction> = generate_move_actions(min_pokemon_id);
             let maximizer_move_actions: Vec<MoveAction> = generate_move_actions(max_pokemon_id);
 
-            for maximizer_choice in 0..maximizer_move_actions.len() {
-                for minimizer_choice in 0..minimizer_move_actions.len() {
+            for maximizer_move_action in &maximizer_move_actions {
+                for minimizer_move_action in &minimizer_move_actions {
                     let mut child_box = Box::new(state_box.copy_game_state());
-                    play_out_turn(&mut child_box, vec![&minimizer_move_actions[minimizer_choice], &maximizer_move_actions[maximizer_choice]], rng);
+                    play_out_turn(&mut child_box, vec![minimizer_move_action, maximizer_move_action], rng);
                     state_box.children.push(child_box);
                 }
             }
+
             state_box.num_maximizer_actions = maximizer_move_actions.len();
             state_box.num_minimizer_actions = minimizer_move_actions.len();
 
@@ -318,6 +318,7 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
         let mut b = 0;
         for j in 0..state_box.num_minimizer_actions {
             if !row_domination[i] && !col_domination[j] {
+                // TODO: Just copy the bound matrices and remove rows/cols as needed?
                 let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
                 let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
                 let alpha_child = game_theory::alpha_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
