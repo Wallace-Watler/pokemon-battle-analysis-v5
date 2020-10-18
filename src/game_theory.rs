@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Error};
+use std::fmt::{Formatter, Error, Debug};
 use std::f64;
 
 #[derive(Debug)]
@@ -15,14 +15,14 @@ pub struct ZeroSumNashEq {
 /// The algorithm follows [Game Theory](docs/Game_Theory.pdf), section 4.5.
 /// It requires that all elements be positive, so supply `added_constant` to ensure this; it will
 /// not affect the equilibrium.
-pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq {
+pub fn calc_nash_eq(payoff_matrix: &MathMatrix, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq {
     if row_domination.len() != payoff_matrix.num_rows() as usize || col_domination.len() != payoff_matrix.num_cols() as usize {
         panic!("Domination labels must match the payoff matrix shape.");
     }
 
     let m = payoff_matrix.num_rows() - row_domination.iter().filter(|b| **b).count();
     let n = payoff_matrix.num_cols() - col_domination.iter().filter(|b| **b).count();
-    let mut tableau = Matrix::of(0.0, m + 1, n + 1);
+    let mut tableau = MathMatrix::of(0.0, m + 1, n + 1);
 
     let mut i_t = 0;
     for (i, row_dominated) in row_domination.iter().enumerate() {
@@ -30,7 +30,7 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
             let mut j_t = 0;
             for (j, col_dominated) in col_domination.iter().enumerate() {
                 if !col_dominated {
-                    *tableau.get_mut(i_t, j_t) = payoff_matrix.get(i, j) + added_constant;
+                    *tableau.get_mut(i_t, j_t) = payoff_matrix.getf(i, j) + added_constant;
                     j_t += 1;
                 }
             }
@@ -58,22 +58,22 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
     while negative_remaining {
         let mut q = 0; // Column to pivot on
         for j in 1..n {
-            if tableau.get(m, j) < tableau.get(m, q) { q = j; }
+            if tableau.getf(m, j) < tableau.getf(m, q) { q = j; }
         }
         let mut p = 0; // Row to pivot on
         for possible_p in 0..m {
-            let tppq = tableau.get(possible_p, q);
-            let tpq = tableau.get(p, q);
-            if !almost::zero(tppq) && tppq > 0.0 && (tableau.get(possible_p, n) / tppq < tableau.get(p, n) / tpq || almost::zero(tpq) || tpq < 0.0) {
+            let tppq = tableau.getf(possible_p, q);
+            let tpq = tableau.getf(p, q);
+            if !almost::zero(tppq) && tppq > 0.0 && (tableau.getf(possible_p, n) / tppq < tableau.getf(p, n) / tpq || almost::zero(tpq) || tpq < 0.0) {
                 p = possible_p;
             }
         }
 
         // Pivot
-        let pivot = tableau.get(p, q);
+        let pivot = tableau.getf(p, q);
         for j in 0..(n + 1) {
             for i in 0..(m + 1) {
-                if i != p && j != q { *tableau.get_mut(i, j) -= tableau.get(p, j) * tableau.get(i, q) / pivot; }
+                if i != p && j != q { *tableau.get_mut(i, j) -= tableau.getf(p, j) * tableau.getf(i, q) / pivot; }
             }
         }
         for j in 0..(n + 1) {
@@ -89,19 +89,19 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
         left_labels[p] = top_labels[q];
         top_labels[q] = temp;
 
-        negative_remaining = (0..n).any(|j| tableau.get(m, j) < 0.0);
+        negative_remaining = (0..n).any(|j| tableau.getf(m, j) < 0.0);
     }
 
     let mut max_player_strategy = vec![0.0; m];
     let mut min_player_strategy = vec![0.0; n];
     for (j, &top_label) in top_labels.iter().enumerate() {
         if top_label > 0 { // If it's one of row player's labels
-            max_player_strategy[top_label as usize - 1] = tableau.get(m, j) / tableau.get(m, n);
+            max_player_strategy[top_label as usize - 1] = tableau.getf(m, j) / tableau.getf(m, n);
         }
     }
     for (i, &left_label) in left_labels.iter().enumerate() {
         if left_label < 0 { // If it's one of column player's labels
-            min_player_strategy[-left_label as usize - 1] = tableau.get(i, n) / tableau.get(m, n);
+            min_player_strategy[-left_label as usize - 1] = tableau.getf(i, n) / tableau.getf(m, n);
         }
     }
 
@@ -119,13 +119,13 @@ pub fn calc_nash_eq(payoff_matrix: &Matrix, row_domination: &[bool], col_dominat
     ZeroSumNashEq {
         max_player_strategy,
         min_player_strategy,
-        expected_payoff: 1.0 / tableau.get(m, n) - added_constant,
+        expected_payoff: 1.0 / tableau.getf(m, n) - added_constant,
     }
 }
 
-pub trait IsMatrix: Display {
-    fn entries(&self) -> &[f64];
-    fn entries_mut(&mut self) -> &mut [f64];
+pub trait IsMatrix<T> {
+    fn entries(&self) -> &[T];
+    fn entries_mut(&mut self) -> &mut [T];
     fn num_rows(&self) -> usize;
     fn num_cols(&self) -> usize;
 
@@ -138,13 +138,19 @@ pub trait IsMatrix: Display {
         self.entries().is_empty()
     }
 
-    fn get(&self, i: usize, j: usize) -> f64 {
-        self.entries()[self.flat_index(i, j)]
+    fn get(&self, i: usize, j: usize) -> &T {
+        &self.entries()[self.flat_index(i, j)]
     }
 
-    fn get_mut(&mut self, i: usize, j: usize) -> &mut f64 {
+    fn get_mut(&mut self, i: usize, j: usize) -> &mut T {
         let flat_index = self.flat_index(i, j);
         self.entries_mut().get_mut(flat_index).unwrap()
+    }
+}
+
+pub trait MatrixF64: IsMatrix<f64> + Debug {
+    fn getf(&self, i: usize, j: usize) -> f64 {
+        self.entries()[self.flat_index(i, j)]
     }
 
     fn set_row(&mut self, i: usize, value: f64) {
@@ -170,12 +176,20 @@ pub trait IsMatrix: Display {
     fn pivot(&mut self, pivot_row: usize, pivot_col: usize) where Self: Sized {
         regular_pivot(self, pivot_row, pivot_col);
     }
+
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        let mut formatted = String::from("");
+        self.entries().chunks(self.num_cols()).for_each(|row| {
+            formatted.push_str(&format!("{:?}\n", row));
+        });
+        write!(f, "{}", formatted)
+    }
 }
 
-fn regular_pivot(matrix: &mut dyn IsMatrix, pivot_row: usize, pivot_col: usize) {
-    let pivot = matrix.get(pivot_row, pivot_col);
+fn regular_pivot(matrix: &mut dyn MatrixF64, pivot_row: usize, pivot_col: usize) {
+    let pivot = matrix.getf(pivot_row, pivot_col);
     if almost::zero(pivot) {
-        println!("{}", matrix);
+        println!("{:?}", matrix);
         panic!(format!("Pivot element ({}, {}) is zero.", pivot_row, pivot_col));
     }
 
@@ -184,19 +198,65 @@ fn regular_pivot(matrix: &mut dyn IsMatrix, pivot_row: usize, pivot_col: usize) 
     }
     for i in 0..matrix.num_rows() {
         if i != pivot_row {
-            let tableau_i_pivot_col = matrix.get(i, pivot_col);
+            let tableau_i_pivot_col = matrix.getf(i, pivot_col);
             if !almost::zero(tableau_i_pivot_col) {
                 for j in 0..matrix.num_cols() {
-                    *matrix.get_mut(i, j) = matrix.get(i, j) - matrix.get(pivot_row, j) * tableau_i_pivot_col
+                    *matrix.get_mut(i, j) = matrix.getf(i, j) - matrix.getf(pivot_row, j) * tableau_i_pivot_col
                 }
             }
         }
     }
 }
 
+pub struct Matrix<T> {
+    entries: Vec<T>,
+    num_rows: usize,
+    num_cols: usize
+}
+
+impl<T> Matrix<T> {
+    pub fn from(entries: Vec<T>, num_rows: usize, num_cols: usize) -> Matrix<T> {
+        if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
+        if entries.len() != num_rows * num_cols { panic!("Number of matrix entries does not match the specified dimensions."); }
+        Matrix {
+            entries,
+            num_rows,
+            num_cols
+        }
+    }
+}
+
+impl<T> IsMatrix<T> for Matrix<T> {
+    fn entries(&self) -> &[T] {
+        &self.entries
+    }
+
+    fn entries_mut(&mut self) -> &mut [T] {
+        &mut self.entries
+    }
+
+    fn num_rows(&self) -> usize {
+        self.num_rows
+    }
+
+    fn num_cols(&self) -> usize {
+        self.num_cols
+    }
+}
+
+impl<T> Debug for Matrix<T> where T: Debug {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        let mut formatted = String::from("");
+        self.entries().chunks(self.num_cols()).for_each(|row| {
+            formatted.push_str(&format!("{:?}\n", row));
+        });
+        write!(f, "{}", formatted)
+    }
+}
+
 #[derive(Clone)]
 pub struct Tableau {
-    matrix: Matrix,
+    matrix: MathMatrix,
     /// Whether each column of the matrix is a basis column; length is always `matrix.num_cols() - 1`.
     col_is_basis: Vec<bool>,
     /// The basis column for each row; length is always `num_rows`.
@@ -204,7 +264,7 @@ pub struct Tableau {
 }
 
 impl Tableau {
-    pub fn from(matrix: Matrix, col_is_basis: Vec<bool>, basis_col: Vec<Option<usize>>) -> Tableau {
+    pub fn from(matrix: MathMatrix, col_is_basis: Vec<bool>, basis_col: Vec<Option<usize>>) -> Tableau {
         if col_is_basis.len() != matrix.num_cols() - 1 { panic!("Number of column basis flags does not equal the matrix's number of columns - 1."); }
         if basis_col.len() != matrix.num_rows() { panic!("Number of basis labels does not match the matrix's number of rows."); }
         Tableau {
@@ -245,7 +305,7 @@ impl Tableau {
     }
 }
 
-impl IsMatrix for Tableau {
+impl IsMatrix<f64> for Tableau {
     fn entries(&self) -> &[f64] {
         self.matrix.entries()
     }
@@ -261,13 +321,15 @@ impl IsMatrix for Tableau {
     fn num_cols(&self) -> usize {
         self.matrix.num_cols()
     }
+}
 
+impl MatrixF64 for Tableau {
     fn pivot(&mut self, pivot_row: usize, pivot_col: usize) {
         if self.col_is_basis[pivot_col] { return; }
 
         let mut exiting_var = 0;
         for j in 0..(self.num_cols() - 1) {
-            if self.col_is_basis[j] && !almost::zero(self.get(pivot_row, j)) {
+            if self.col_is_basis[j] && !almost::zero(self.getf(pivot_row, j)) {
                 exiting_var = j;
                 break;
             }
@@ -280,9 +342,9 @@ impl IsMatrix for Tableau {
     }
 }
 
-impl Display for Tableau {
+impl Debug for Tableau {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let mut formatted = format!("{}", self.matrix);
+        let mut formatted = format!("{:?}", self.matrix);
         formatted.push_str(&format!("col_is_basis: {:?}\n", self.col_is_basis()));
         formatted.push_str(&format!("basis_col: {:?}\n", self.basis_col()));
         write!(f, "{}", formatted)
@@ -290,62 +352,62 @@ impl Display for Tableau {
 }
 
 #[derive(Clone)]
-pub struct Matrix {
+pub struct MathMatrix {
     entries: Vec<f64>,
     num_rows: usize,
     num_cols: usize
 }
 
-impl Matrix {
-    pub fn from(entries: Vec<f64>, num_rows: usize, num_cols: usize) -> Matrix {
+impl MathMatrix {
+    pub fn from(entries: Vec<f64>, num_rows: usize, num_cols: usize) -> MathMatrix {
         if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
         if entries.len() != num_rows * num_cols { panic!("Number of matrix entries does not match the specified dimensions."); }
-        Matrix {
+        MathMatrix {
             entries,
             num_rows,
             num_cols
         }
     }
 
-    pub fn of(fill: f64, num_rows: usize, num_cols: usize) -> Matrix {
+    pub fn of(fill: f64, num_rows: usize, num_cols: usize) -> MathMatrix {
         if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
-        Matrix {
+        MathMatrix {
             entries: vec![fill; num_rows * num_cols],
             num_rows,
             num_cols
         }
     }
 
-    fn transposed(&self) -> Matrix {
-        let mut result = Matrix::of(0.0, self.num_cols(), self.num_rows());
+    fn transposed(&self) -> MathMatrix {
+        let mut result = MathMatrix::of(0.0, self.num_cols(), self.num_rows());
         for i in 0..self.num_rows() {
             for j in 0..self.num_cols() {
-                *result.get_mut(j, i) = self.get(i, j);
+                *result.get_mut(j, i) = self.getf(i, j);
             }
         }
         result
     }
 
-    fn without_row(&self, i: usize) -> Matrix {
+    fn without_row(&self, i: usize) -> MathMatrix {
         let mut result = self.clone();
         result.del_row(i);
         result
     }
 
-    fn without_col(&self, j: usize) -> Matrix {
+    fn without_col(&self, j: usize) -> MathMatrix {
         let mut result = self.clone();
         result.del_col(j);
         result
     }
 
-    pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> Matrix {
+    pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> MathMatrix {
         if row_exclusion.len() != self.num_rows() || col_exclusion.len() != self.num_cols() {
             panic!("Row and column exclusions must match matrix dimensions.");
         }
 
         let m = self.num_rows() - row_exclusion.iter().filter(|b| **b).count();
         let n = self.num_cols() - col_exclusion.iter().filter(|b| **b).count();
-        let mut result = Matrix::of(0.0, m, n);
+        let mut result = MathMatrix::of(0.0, m, n);
 
         let mut i_r = 0;
         for i in 0..self.num_rows() {
@@ -353,7 +415,7 @@ impl Matrix {
                 let mut j_r = 0;
                 for j in 0..self.num_cols() {
                     if !col_exclusion[j] {
-                        *result.get_mut(i_r, j_r) = self.get(i, j);
+                        *result.get_mut(i_r, j_r) = self.getf(i, j);
                         j_r += 1;
                     }
                 }
@@ -383,7 +445,7 @@ impl Matrix {
     }
 }
 
-impl IsMatrix for Matrix {
+impl IsMatrix<f64> for MathMatrix {
     fn entries(&self) -> &[f64] {
         &self.entries
     }
@@ -401,7 +463,9 @@ impl IsMatrix for Matrix {
     }
 }
 
-impl Display for Matrix {
+impl MatrixF64 for MathMatrix {}
+
+impl Debug for MathMatrix {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         let mut formatted = String::from("");
         self.entries().chunks(self.num_cols()).for_each(|row| {
@@ -413,9 +477,9 @@ impl Display for Matrix {
 
 pub fn select_pivot_col(tableau: &Tableau) -> Option<usize> {
     let mut pivot_col = Some(0);
-    let mut min_obj_coeff = tableau.get(0, 0);
+    let mut min_obj_coeff = tableau.getf(0, 0);
     for j in 1..tableau.col_is_basis().len() {
-        let obj_coeff = tableau.get(0, j);
+        let obj_coeff = tableau.getf(0, j);
         if !tableau.col_is_basis()[j] && obj_coeff < min_obj_coeff {
             min_obj_coeff = obj_coeff;
             pivot_col = Some(j);
@@ -428,8 +492,8 @@ pub fn select_pivot_row(tableau: &Tableau, pivot_col: usize, min_row: usize) -> 
     let mut pivot_row = min_row;
     let mut min_ratio = f64::INFINITY;
     for i in min_row..tableau.num_rows() {
-        if tableau.get(i, pivot_col) > 0.0 && !almost::zero(tableau.get(i, pivot_col)) {
-            let ratio = tableau.get(i, tableau.num_cols() - 1) / tableau.get(i, pivot_col);
+        if tableau.getf(i, pivot_col) > 0.0 && !almost::zero(tableau.getf(i, pivot_col)) {
+            let ratio = tableau.getf(i, tableau.num_cols() - 1) / tableau.getf(i, pivot_col);
             if ratio < min_ratio {
                 min_ratio = ratio;
                 pivot_row = i;
@@ -448,12 +512,12 @@ pub fn simplex_phase2(tableau: &mut Tableau) {
 
 #[allow(clippy::many_single_char_names)]
 #[allow(clippy::needless_range_loop)]
-pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
+pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     let m = a.num_rows();
     let n = a.num_cols();
 
     // Create a tableau representing the LP with slack variables and artificial variables.
-    let mut tableau_mat = Matrix::of(0.0, m + 3, n + 2 * m + 2);
+    let mut tableau_mat = MathMatrix::of(0.0, m + 3, n + 2 * m + 2);
     let mut is_col_basis = vec![false; tableau_mat.num_cols() - 1];
     let mut basis_col = vec![None; tableau_mat.num_rows()];
 
@@ -461,7 +525,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
         *tableau_mat.get_mut(1, j) = -c[j];
         *tableau_mat.get_mut(tableau_mat.num_rows() - 1, j) = 1.0;
         for i in 0..m {
-            *tableau_mat.get_mut(i + 2, j) = a.get(i, j);
+            *tableau_mat.get_mut(i + 2, j) = a.getf(i, j);
         }
     }
     for i in 0..m {
@@ -472,7 +536,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
         is_col_basis[j + n] = true;
         basis_col[j + 2] = Some(j + n);
         *tableau_mat.get_mut(0, j + n + m) = 1.0;
-        *tableau_mat.get_mut(j + 2, j + n + m) = if tableau_mat.get(j + 2, tableau_mat.num_cols() - 1) < 0.0 { -1.0 } else { 1.0 };
+        *tableau_mat.get_mut(j + 2, j + n + m) = if tableau_mat.getf(j + 2, tableau_mat.num_cols() - 1) < 0.0 { -1.0 } else { 1.0 };
     }
     *tableau_mat.get_mut(0, tableau_mat.num_cols() - 2) = 1.0;
     *tableau_mat.get_mut(tableau_mat.num_rows() - 1, tableau_mat.num_cols() - 2) = 1.0;
@@ -492,7 +556,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     }
 
     // If the artificial variables are not zero by now, the original LP is infeasible.
-    if !almost::zero(tableau.get(0, tableau.num_cols() - 1)) {
+    if !almost::zero(tableau.getf(0, tableau.num_cols() - 1)) {
         return None;
     }
 
@@ -504,7 +568,7 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
                 let mut pivoted = false;
                 for pivot_col in 0..(n + m) {
                     if !tableau.col_is_basis()[pivot_col] {
-                        let potential_pivot = tableau.get(pivot_row, pivot_col);
+                        let potential_pivot = tableau.getf(pivot_row, pivot_col);
                         if !almost::zero(potential_pivot) && potential_pivot > 0.0 {
                             tableau.pivot(pivot_row, pivot_col);
                             pivoted = true;
@@ -531,19 +595,19 @@ pub fn simplex_phase1(a: &Matrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     Some(tableau)
 }
 
-pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &Matrix, optimistic_bounds_wo_domination: &Matrix, alpha: f64) -> f64 {
+pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, alpha: f64) -> f64 {
     let mut p_t = pessimistic_bounds_wo_domination.clone();
     p_t.set_row(a, alpha);
-    let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.get(i, b)).collect();
+    let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.getf(i, b)).collect();
     p_t.del_col(b);
     p_t = p_t.transposed();
     p_t.scale(-1.0);
 
-    let f: Vec<f64> = (0..optimistic_bounds_wo_domination.num_cols()).filter(|j| *j != b).map(|j| -optimistic_bounds_wo_domination.get(a, j)).collect();
+    let f: Vec<f64> = (0..optimistic_bounds_wo_domination.num_cols()).filter(|j| *j != b).map(|j| -optimistic_bounds_wo_domination.getf(a, j)).collect();
 
     if let Some(mut tableau) = simplex_phase1(&p_t, &f, &e) {
         simplex_phase2(&mut tableau);
-        let mut alpha_child = tableau.get(0, tableau.num_cols() - 1);
+        let mut alpha_child = tableau.getf(0, tableau.num_cols() - 1);
         if almost::equal(alpha_child, -1.0) {
             alpha_child = -1.0;
         } else if almost::equal(alpha_child, 1.0) {
@@ -559,17 +623,17 @@ pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &Matrix
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &Matrix, optimistic_bounds_wo_domination: &Matrix, beta: f64) -> f64 {
+pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, beta: f64) -> f64 {
     let mut o = optimistic_bounds_wo_domination.clone();
     o.set_col(b, beta);
-    let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.get(a, j)).collect();
+    let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.getf(a, j)).collect();
     o.del_row(a);
 
-    let f: Vec<f64> = (0..pessimistic_bounds_wo_domination.num_rows()).filter(|i| *i != a).map(|i| pessimistic_bounds_wo_domination.get(i, b)).collect();
+    let f: Vec<f64> = (0..pessimistic_bounds_wo_domination.num_rows()).filter(|i| *i != a).map(|i| pessimistic_bounds_wo_domination.getf(i, b)).collect();
 
     if let Some(mut tableau) = simplex_phase1(&o, &f, &e) {
         simplex_phase2(&mut tableau);
-        let mut beta_child = -tableau.get(0, tableau.num_cols() - 1);
+        let mut beta_child = -tableau.getf(0, tableau.num_cols() - 1);
         if almost::equal(beta_child, -1.0) {
             beta_child = -1.0;
         } else if almost::equal(beta_child, 1.0) {

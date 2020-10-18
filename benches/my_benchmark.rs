@@ -2,7 +2,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
 use pokemon_battle_analysis_v5::state::State;
 use pokemon_battle_analysis_v5::setup::PokemonConfig;
-use pokemon_battle_analysis_v5::game_theory::Matrix;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
 
@@ -45,7 +44,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state(), &mut rng)));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle_v2(test_state(), &mut rng)));
 }
 
 criterion_group!{

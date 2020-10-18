@@ -33,11 +33,6 @@ fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
         if d < weight { return i; }
         d -= weight;
     }
-    /*for i in 0..weights.len() {
-        let w = weights[i];
-        if d < w { return i; }
-        d -= w;
-    }*/
     weights.len() - 1
 }
 

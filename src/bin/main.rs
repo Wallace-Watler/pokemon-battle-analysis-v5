@@ -60,5 +60,5 @@ fn main() {
         num_minimizer_actions: 0
     };
 
-    state::run_battle_v2(test_state(), &mut rng);
+    println!("Value: {}", state::run_battle_v2(test_state(), &mut rng));
 }

@@ -1,11 +1,11 @@
-use std::cmp::max;
+use std::cmp::{max, min};
 
 use rand::Rng;
 
 use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, Terrain, Weather, game_theory};
 use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
-use crate::game_theory::{ZeroSumNashEq, Matrix, IsMatrix};
+use crate::game_theory::{ZeroSumNashEq, MathMatrix, IsMatrix, Matrix};
 use rand::prelude::StdRng;
 
 pub const AI_LEVEL: u8 = 2;
@@ -277,7 +277,7 @@ fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
                 - state_box.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
         }
     } else {
-        let payoff_matrix = Matrix::from(
+        let payoff_matrix = MathMatrix::from(
             state_box.children.iter().map(|child_box| heuristic_value(child_box).expected_payoff).collect(),
             state_box.num_maximizer_actions,
             state_box.num_minimizer_actions);
@@ -305,49 +305,79 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
         }
     }
 
+    let num_max_actions = state_box.num_maximizer_actions;
+    let num_min_actions = state_box.num_minimizer_actions;
+
     // Min and max possible values of child states.
-    let mut pessimistic_bounds = Matrix::of(-1.0, state_box.num_maximizer_actions, state_box.num_minimizer_actions);
-    let mut optimistic_bounds = Matrix::of(1.0, state_box.num_maximizer_actions, state_box.num_minimizer_actions);
+    let mut pessimistic_bounds = MathMatrix::of(-1.0, num_max_actions, num_min_actions);
+    let mut optimistic_bounds = MathMatrix::of(1.0, num_max_actions, num_min_actions);
 
-    let mut row_domination = vec![false; state_box.num_maximizer_actions];
-    let mut col_domination = vec![false; state_box.num_minimizer_actions];
+    let mut row_domination = vec![false; num_max_actions];
+    let mut col_domination = vec![false; num_min_actions];
 
-    // `a` and `b` are indexers for the matrices resulting from removing dominated rows and columns.
-    let mut a = 0;
-    for i in 0..state_box.num_maximizer_actions {
-        let mut b = 0;
-        for j in 0..state_box.num_minimizer_actions {
-            if !row_domination[i] && !col_domination[j] {
-                // TODO: Just copy the bound matrices and remove rows/cols as needed?
-                let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
-                let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
-                let alpha_child = game_theory::alpha_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
-                let beta_child = game_theory::beta_child(a, b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, beta);
-                let child_index = i * state_box.num_minimizer_actions + j;
+    let mut ab_coords = Vec::new();
+    for i in 0..num_max_actions {
+        for j in 0..num_min_actions {
+            ab_coords.push((i, j));
+        }
+    }
+    let mut ij_to_ab_map = Matrix::from(ab_coords, num_max_actions, num_min_actions);
 
-                if alpha_child >= beta_child {
-                    const EPSILON: f64 = 0.0; // TODO: How small should epsilon be?
-                    let value = smab_search(&mut state_box.children[child_index], alpha_child, alpha_child + EPSILON, recursions - 1, rng).expected_payoff;
-                    if value <= alpha_child {
-                        row_domination[i] = true;
-                    } else {
-                        col_domination[j] = true;
-                    }
+    let mut explore_child = |i: usize, j: usize| {
+        if !row_domination[i] && !col_domination[j] {
+            // TODO: Just copy the bound matrices and remove rows/cols as needed?
+            let (a, b) = ij_to_ab_map.get(i, j);
+            let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
+            let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
+            let alpha_child = game_theory::alpha_child(*a, *b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
+            let beta_child = game_theory::beta_child(*a, *b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, beta);
+            let child_index = i * num_min_actions + j;
+
+            if alpha_child >= beta_child {
+                const EPSILON: f64 = 0.0; // TODO: How small should epsilon be?
+                let value = smab_search(&mut state_box.children[child_index], alpha_child, alpha_child + EPSILON, recursions - 1, rng).expected_payoff;
+                if value <= alpha_child {
+                    row_domination[i] = true;
                 } else {
-                    let value = smab_search(&mut state_box.children[child_index], alpha_child, beta_child, recursions - 1, rng).expected_payoff;
-                    if value <= alpha_child {
-                        row_domination[i] = true;
-                    } else if value >= beta_child {
-                        col_domination[j] = true;
-                    } else {
-                        *pessimistic_bounds.get_mut(i, j) = value;
-                        *optimistic_bounds.get_mut(i, j) = value;
+                    col_domination[j] = true;
+                }
+            } else {
+                let value = smab_search(&mut state_box.children[child_index], alpha_child, beta_child, recursions - 1, rng).expected_payoff;
+                if value <= alpha_child {
+                    row_domination[i] = true;
+                } else if value >= beta_child {
+                    col_domination[j] = true;
+                } else {
+                    *pessimistic_bounds.get_mut(i, j) = value;
+                    *optimistic_bounds.get_mut(i, j) = value;
+                }
+            }
+
+            if row_domination[i] {
+                for x in (i + 1)..ij_to_ab_map.num_rows() {
+                    for y in 0..ij_to_ab_map.num_cols() {
+                        ij_to_ab_map.get_mut(x, y).0 -= 1
                     }
                 }
             }
-            if !col_domination[j] { b += 1; }
+            if col_domination[j] {
+                for x in 0..ij_to_ab_map.num_rows() {
+                    for y in (j + 1)..ij_to_ab_map.num_cols() {
+                        ij_to_ab_map.get_mut(x, y).1 -= 1
+                    }
+                }
+            }
         }
-        if !row_domination[i] { a += 1; }
+    };
+
+    // Explore child matrix in an L-shape
+    for d in 0..min(num_min_actions, num_max_actions) {
+        for j in d..num_min_actions {
+            explore_child(d, j);
+        }
+        for i in (d + 1)..num_max_actions {
+            explore_child(i, d);
+        }
     }
 
     if row_domination.iter().all(|b| *b) {
