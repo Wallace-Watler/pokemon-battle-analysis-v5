@@ -7,8 +7,9 @@ use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
 use crate::game_theory::{ZeroSumNashEq, MathMatrix, IsMatrix, Matrix};
 use rand::prelude::StdRng;
+use coarse_prof::profile;
 
-pub const AI_LEVEL: u8 = 2;
+pub const AI_LEVEL: u8 = 3;
 
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
@@ -65,6 +66,8 @@ impl State {
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
 pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
+    profile!("run_battle");
+
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -102,6 +105,8 @@ pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
 pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
+    profile!("run_battle_v2");
+
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -129,6 +134,8 @@ pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
 
 /// Returns how many extra recursions should be done for the state's subtree.
 fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> u8 {
+    profile!("generate_immediate_children");
+
     match state_box.min_pokemon_id.zip(state_box.max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
             match state_box.min_pokemon_id.xor(state_box.max_pokemon_id) {
@@ -289,6 +296,8 @@ fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 // TODO: Order moves/children so that pruning is most likely to occur
 fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
+    profile!("smab_search");
+
     if recursions < 1 {
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),

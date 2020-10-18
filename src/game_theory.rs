@@ -1,5 +1,6 @@
 use std::fmt::{Formatter, Error, Debug};
 use std::f64;
+use coarse_prof::profile;
 
 #[derive(Debug)]
 pub struct ZeroSumNashEq {
@@ -401,6 +402,8 @@ impl MathMatrix {
     }
 
     pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> MathMatrix {
+        profile!("row_col_restricted");
+
         if row_exclusion.len() != self.num_rows() || col_exclusion.len() != self.num_cols() {
             panic!("Row and column exclusions must match matrix dimensions.");
         }
@@ -596,6 +599,8 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
 }
 
 pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, alpha: f64) -> f64 {
+    profile!("alpha_child");
+
     let mut p_t = pessimistic_bounds_wo_domination.clone();
     p_t.set_row(a, alpha);
     let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.getf(i, b)).collect();
@@ -624,6 +629,8 @@ pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMa
 
 #[allow(clippy::many_single_char_names)]
 pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, beta: f64) -> f64 {
+    profile!("beta_child");
+
     let mut o = optimistic_bounds_wo_domination.clone();
     o.set_col(b, beta);
     let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.getf(a, j)).collect();

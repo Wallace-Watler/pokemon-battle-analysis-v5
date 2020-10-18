@@ -60,5 +60,8 @@ fn main() {
         num_minimizer_actions: 0
     };
 
-    println!("Value: {}", state::run_battle_v2(test_state(), &mut rng));
+    state::run_battle_v2(test_state(), &mut rng);
+
+    println!();
+    coarse_prof::write(&mut std::io::stdout()).unwrap();
 }
