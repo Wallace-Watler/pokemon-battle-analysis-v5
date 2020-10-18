@@ -44,7 +44,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle_v2(test_state(), &mut rng)));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle_smab(test_state(), &mut rng)));
 }
 
 criterion_group!{

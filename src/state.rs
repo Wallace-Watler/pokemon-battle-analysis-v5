@@ -24,8 +24,7 @@ pub struct State {
     pub turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
     pub display_text: Vec<String>,
-    pub children: Vec<Box<State>>,
-    // TODO: Try unboxing
+    pub children: Vec<Box<State>>, // TODO: Try unboxing
     pub num_maximizer_actions: usize,
     pub num_minimizer_actions: usize,
 }
@@ -102,7 +101,7 @@ pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
 /// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
+pub fn run_battle_smab(state: State, rng: &mut StdRng) -> f64 {
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();

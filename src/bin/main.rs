@@ -13,11 +13,6 @@ use rand::prelude::StdRng;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-//use tcmalloc::TCMalloc;
-
-//#[global_allocator]
-//static GLOBAL: TCMalloc = TCMalloc;
-
 fn main() {
     //let args: Vec<String> = env::args().collect();
 
@@ -60,7 +55,5 @@ fn main() {
         num_minimizer_actions: 0
     };
 
-    state::run_battle_v2(test_state(), &mut rng);
-
-    println!();
+    state::run_battle_smab(test_state(), &mut rng);
 }

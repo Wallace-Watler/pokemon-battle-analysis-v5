@@ -16,9 +16,7 @@ pub struct ZeroSumNashEq {
 /// It requires that all elements be positive, so supply `added_constant` to ensure this; it will
 /// not affect the equilibrium.
 pub fn calc_nash_eq(payoff_matrix: &MathMatrix, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq {
-    if row_domination.len() != payoff_matrix.num_rows() as usize || col_domination.len() != payoff_matrix.num_cols() as usize {
-        panic!("Domination labels must match the payoff matrix shape.");
-    }
+    debug_assert!(row_domination.len() == payoff_matrix.num_rows() as usize && col_domination.len() == payoff_matrix.num_cols() as usize, "Domination labels must match the payoff matrix shape.");
 
     let m = payoff_matrix.num_rows() - row_domination.iter().filter(|b| **b).count();
     let n = payoff_matrix.num_cols() - col_domination.iter().filter(|b| **b).count();
@@ -139,6 +137,7 @@ pub trait IsMatrix<T> {
         self.entries().is_empty()
     }
 
+    #[inline(always)]
     fn get(&self, i: usize, j: usize) -> &T {
         &self.entries()[self.flat_index(i, j)]
     }
@@ -146,7 +145,7 @@ pub trait IsMatrix<T> {
     #[inline(always)]
     fn get_mut(&mut self, i: usize, j: usize) -> &mut T {
         let flat_index = self.flat_index(i, j);
-        self.entries_mut().get_mut(flat_index).unwrap()
+        self.entries_mut().get_mut(flat_index).unwrap() // TODO: Unchecked?
     }
 }
 
@@ -199,10 +198,10 @@ fn regular_pivot<T>(matrix: &mut T, pivot_row: usize, pivot_col: usize) where T:
 
     for i in 0..matrix.num_rows() {
         if i != pivot_row {
-            let tableau_i_pivot_col = matrix.getf(i, pivot_col);
-            if !almost::zero(tableau_i_pivot_col) {
+            let matrix_i_pivot_col = matrix.getf(i, pivot_col);
+            if !almost::zero(matrix_i_pivot_col) {
                 for j in 0..matrix.num_cols() {
-                    *matrix.get_mut(i, j) -= matrix.getf(pivot_row, j) * tableau_i_pivot_col
+                    *matrix.get_mut(i, j) -= matrix.getf(pivot_row, j) * matrix_i_pivot_col
                 }
             }
         }
@@ -217,8 +216,8 @@ pub struct Matrix<T> {
 
 impl<T> Matrix<T> {
     pub fn from(entries: Vec<T>, num_rows: usize, num_cols: usize) -> Matrix<T> {
-        if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
-        if entries.len() != num_rows * num_cols { panic!("Number of matrix entries does not match the specified dimensions."); }
+        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
+        debug_assert!(entries.len() == num_rows * num_cols, "Number of matrix entries does not match the specified dimensions.");
         Matrix {
             entries,
             num_rows,
@@ -365,8 +364,8 @@ pub struct MathMatrix {
 
 impl MathMatrix {
     pub fn from(entries: Vec<f64>, num_rows: usize, num_cols: usize) -> MathMatrix {
-        if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
-        if entries.len() != num_rows * num_cols { panic!("Number of matrix entries does not match the specified dimensions."); }
+        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
+        debug_assert!(entries.len() == num_rows * num_cols, "Number of matrix entries does not match the specified dimensions.");
         MathMatrix {
             entries,
             num_rows,
@@ -375,7 +374,7 @@ impl MathMatrix {
     }
 
     pub fn of(fill: f64, num_rows: usize, num_cols: usize) -> MathMatrix {
-        if num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0) { panic!("Requested matrix size is too large."); }
+        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
         MathMatrix {
             entries: vec![fill; num_rows * num_cols],
             num_rows,
@@ -406,20 +405,18 @@ impl MathMatrix {
     }
 
     pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> MathMatrix {
-        debug_assert!(row_exclusion.len() == self.num_rows()
-                          && col_exclusion.len() == self.num_cols(),
-                      "Row and column exclusions must match matrix dimensions.");
+        debug_assert!(row_exclusion.len() == self.num_rows() && col_exclusion.len() == self.num_cols(), "Row and column exclusions must match matrix dimensions.");
 
         let m = self.num_rows() - row_exclusion.iter().filter(|b| **b).count();
         let n = self.num_cols() - col_exclusion.iter().filter(|b| **b).count();
         let mut result = MathMatrix::of(0.0, m, n);
 
         let mut i_r = 0;
-        for (i, item) in row_exclusion.iter().enumerate() {
-            if !*item {
+        for (i, &row_excluded) in row_exclusion.iter().enumerate() {
+            if !row_excluded {
                 let mut j_r = 0;
-                for (j, item) in col_exclusion.iter().enumerate().take(self.num_cols()) {
-                    if !*item {
+                for (j, &col_excluded) in col_exclusion.iter().enumerate().take(self.num_cols()) {
+                    if !col_excluded {
                         *result.get_mut(i_r, j_r) = self.getf(i, j);
                         j_r += 1;
                     }
@@ -524,20 +521,23 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     let m = a.num_rows();
     let n = a.num_cols();
 
+    debug_assert!(b.len() == m);
+    debug_assert!(c.len() == n);
+
     // Create a tableau representing the LP with slack variables and artificial variables.
     let mut tableau_mat = MathMatrix::of(0.0, m + 3, n + 2 * m + 2);
     let mut is_col_basis = vec![false; tableau_mat.num_cols() - 1];
     let mut basis_col = vec![None; tableau_mat.num_rows()];
 
-    for (j, item) in c.iter().enumerate().take(n) {
-        *tableau_mat.get_mut(1, j) = -*item;
+    for (j, &c_j) in c.iter().enumerate() {
+        *tableau_mat.get_mut(1, j) = -c_j;
         *tableau_mat.get_mut(tableau_mat.num_rows() - 1, j) = 1.0;
         for i in 0..m {
             *tableau_mat.get_mut(i + 2, j) = a.getf(i, j);
         }
     }
-    for (i, item) in b.iter().enumerate().take(m) {
-        *tableau_mat.get_mut(i + 2, tableau_mat.num_cols() - 1) = *item;
+    for (i, &b_i) in b.iter().enumerate() {
+        *tableau_mat.get_mut(i + 2, tableau_mat.num_cols() - 1) = b_i;
     }
 
     for j in 0..m {
@@ -589,7 +589,6 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
                 // and the basic artificial variable.
                 if !pivoted {
                     tableau.del_row(pivot_row);
-                    //tableau.col_is_basis_mut()[j] = false;
                 }
             }
         }
@@ -622,9 +621,7 @@ pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMa
         } else if almost::equal(alpha_child, 1.0) {
             alpha_child = 1.0;
         }
-        if alpha_child < -1.0 || alpha_child > 1.0 {
-            panic!(format!("Alpha outside of bounds: {}", alpha_child));
-        }
+        debug_assert!(alpha_child >= -1.0 && alpha_child <= 1.0, format!("Alpha outside of bounds: {}", alpha_child));
         alpha_child
     } else {
         -1.0
@@ -648,9 +645,7 @@ pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMat
         } else if almost::equal(beta_child, 1.0) {
             beta_child = 1.0;
         }
-        if beta_child < -1.0 || beta_child > 1.0 {
-            panic!(format!("Beta outside of bounds: {}", beta_child));
-        }
+        debug_assert!(beta_child >= -1.0 && beta_child <= 1.0, format!("Beta outside of bounds: {}", beta_child));
         beta_child
     } else {
         1.0
