@@ -149,35 +149,35 @@ pub fn calculated_stat(state_box: &State, pokemon_id: u8, stat_index: StatIndex)
     calculated_stat
 }
 
-pub fn add_to_field(state_box: &mut Box<State>, pokemon_id: u8, field_position: FieldPosition) -> bool {
-    state_box.pokemon[pokemon_id as usize].field_position = Some(field_position);
+pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosition) -> bool {
+    state.pokemon[pokemon_id as usize].field_position = Some(field_position);
 
     if cfg!(feature = "print-battle") {
-        let pokemon_display_text = format!("{}", state_box.pokemon[pokemon_id as usize]);
-        state_box.display_text.push(format!("Adding {} to field position {:?}.", pokemon_display_text, field_position));
+        let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+        state.display_text.push(format!("Adding {} to field position {:?}.", pokemon_display_text, field_position));
     }
     match field_position {
         FieldPosition::Min => {
-            match state_box.min_pokemon_id {
-                None => { state_box.min_pokemon_id = Some(pokemon_id); }
+            match state.min_pokemon_id {
+                None => { state.min_pokemon_id = Some(pokemon_id); }
                 Some(min_pokemon_id) => {
-                    let pokemon_display_text = format!("{}", state_box.pokemon[pokemon_id as usize]);
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state_box.pokemon[min_pokemon_id as usize]));
+                    let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon[min_pokemon_id as usize]));
                 }
             }
         }
         FieldPosition::Max => {
-            match state_box.max_pokemon_id {
-                None => { state_box.max_pokemon_id = Some(pokemon_id); }
+            match state.max_pokemon_id {
+                None => { state.max_pokemon_id = Some(pokemon_id); }
                 Some(max_pokemon_id) => {
-                    let pokemon_display_text = format!("{}", state_box.pokemon[pokemon_id as usize]);
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state_box.pokemon[max_pokemon_id as usize]));
+                    let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon[max_pokemon_id as usize]));
                 }
             }
         }
     }
 
-    state_box.battle_end_check()
+    state.battle_end_check()
 }
 
 fn remove_from_field(state_box: &mut State, pokemon_id: u8) {
@@ -250,10 +250,10 @@ pub fn increment_stat_stage(state_box: &mut State, pokemon_id: u8, stat_index: S
     }
 }
 
-pub fn increment_msa_counter(state_box: &mut Box<State>, pokemon_id: u8) {
+pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
     let mut msa_cured = false;
     {
-        let pokemon = &mut state_box.pokemon[pokemon_id as usize];
+        let pokemon = &mut state.pokemon[pokemon_id as usize];
         if let Some(msa_counter_target) = pokemon.msa_counter_target {
             if pokemon.major_status_ailment != MajorStatusAilment::Okay {
                 pokemon.msa_counter += pokemon.snore_sleep_talk_counter as u16 + 1;
@@ -269,10 +269,10 @@ pub fn increment_msa_counter(state_box: &mut Box<State>, pokemon_id: u8) {
     }
 
     if msa_cured && cfg!(feature = "print-battle") {
-        let pokemon = &state_box.pokemon[pokemon_id as usize];
+        let pokemon = &state.pokemon[pokemon_id as usize];
         let pokemon_species_name = pokemon.species.name;
         let cured_display_text = pokemon.major_status_ailment.display_text_when_cured();
-        state_box.display_text.push(format!("{}{}", pokemon_species_name, cured_display_text));
+        state.display_text.push(format!("{}{}", pokemon_species_name, cured_display_text));
     }
 }
 

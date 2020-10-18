@@ -92,18 +92,17 @@ impl MoveAction {
         }
     }
 
-    pub fn can_be_performed(&self, state_box: &mut Box<State>, rng: &mut StdRng) -> bool {
-        let user_msa = state_box.pokemon[self.user_id as usize].major_status_ailment();
-        // TODO: Use seeded RNG
+    pub fn can_be_performed(&self, state: &mut State, rng: &mut StdRng) -> bool {
+        let user_msa = state.pokemon[self.user_id as usize].major_status_ailment();
         if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
             if cfg!(feature = "print-battle") {
-                let user_display_text = format!("{}", &state_box.pokemon[self.user_id as usize]);
-                state_box.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
+                let user_display_text = format!("{}", &state.pokemon[self.user_id as usize]);
+                state.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
             }
             return false;
         }
 
-        let user = &state_box.pokemon[self.user_id as usize];
+        let user = &state.pokemon[self.user_id as usize];
         if user.current_hp == 0 || user.field_position == None { return false; }
         match self.move_index {
             Some(move_index) => {
@@ -115,42 +114,42 @@ impl MoveAction {
     }
 
     /// Called just before can_be_performed is evaluated.
-    pub fn pre_move_stuff(&self, state_box: &mut Box<State>) {
-        pokemon::increment_msa_counter(state_box, self.user_id);
+    pub fn pre_move_stuff(&self, state: &mut State) {
+        pokemon::increment_msa_counter(state, self.user_id);
     }
 
-    pub fn perform(&self, state_box: &mut Box<State>, move_action_queue: &[&MoveAction], rng: &mut StdRng) -> bool {
+    pub fn perform(&self, state: &mut State, move_action_queue: &[&MoveAction], rng: &mut StdRng) -> bool {
         if let Some(move_index) = self.move_index {
-            state_box.pokemon[self.user_id as usize].known_moves[move_index as usize].pp -= 1;
+            state.pokemon[self.user_id as usize].known_moves[move_index as usize].pp -= 1;
         }
 
         if cfg!(feature = "print-battle") {
-            let user_display_text = format!("{}", state_box.pokemon[self.user_id as usize]);
-            state_box.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
+            let user_display_text = format!("{}", state.pokemon[self.user_id as usize]);
+            state.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
         }
 
         for target_pos in &self.target_positions {
             let target_id = if *target_pos == FieldPosition::Min {
-                state_box.min_pokemon_id
+                state.min_pokemon_id
             } else {
-                state_box.max_pokemon_id
+                state.max_pokemon_id
             };
 
             match target_id {
                 Some(target_id) => {
                     if cfg!(feature = "print-battle") {
-                        let target_display_text = format!("{}", &state_box.pokemon[target_id as usize]);
-                        state_box.display_text.push(format!("- {}", target_display_text));
+                        let target_display_text = format!("{}", &state.pokemon[target_id as usize]);
+                        state.display_text.push(format!("- {}", target_display_text));
                     }
 
-                    if (self.move_.effect)(state_box, move_action_queue, self.user_id, target_id, rng) {
+                    if (self.move_.effect)(state, move_action_queue, self.user_id, target_id, rng) {
                         return true;
                     }
                 }
                 None => {
                     if cfg!(feature = "print-battle") {
-                        state_box.display_text.push(String::from("- None"));
-                        state_box.display_text.push(String::from("But it failed!"));
+                        state.display_text.push(String::from("- None"));
+                        state.display_text.push(String::from("But it failed!"));
                     }
                 }
             }
