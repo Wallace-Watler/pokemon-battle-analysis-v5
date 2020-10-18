@@ -82,7 +82,7 @@ impl MoveAction {
      * @param otherAction - some other move action
      * @return Whether this move action should come before {@code otherAction} based on priority and the user's speed.
      */
-    pub fn outspeeds(&self, state_box: &Box<State>, other_action: &MoveAction, rng: &mut StdRng) -> bool {
+    pub fn outspeeds(&self, state_box: &State, other_action: &MoveAction, rng: &mut StdRng) -> bool {
         if self.move_.priority_stage == other_action.move_.priority_stage {
             let this_spd = pokemon::calculated_stat(state_box, self.user_id, StatIndex::Spd);
             let other_spd = pokemon::calculated_stat(state_box, other_action.user_id, StatIndex::Spd);
@@ -176,7 +176,7 @@ pub struct Move {
     pub max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&mut Box<State>, &[&MoveAction], u8, u8, &mut StdRng) -> bool,
+    effect: fn(&mut State, &[&MoveAction], u8, u8, &mut StdRng) -> bool,
 }
 
 impl Debug for Move {
@@ -309,7 +309,7 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
     (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
-fn growl(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn growl(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     if !std_accuracy_check(&state_box.pokemon[user_id as usize], &state_box.pokemon[target_id as usize], 100, rng) {
         if cfg!(feature = "print-battle") {
             let target_name = state_box.pokemon[target_id as usize].species.name;
@@ -322,7 +322,7 @@ fn growl(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, t
     false
 }
 
-fn leech_seed(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn leech_seed(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_is_grass_type;
     {
@@ -366,7 +366,7 @@ fn leech_seed(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: 
     false
 }
 
-fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn struggle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -440,7 +440,7 @@ fn struggle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8
     pokemon::apply_damage(state_box, user_id, recoil_damage)
 }
 
-fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn tackle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;
@@ -525,7 +525,7 @@ fn tackle(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, 
     pokemon::apply_damage(state_box, target_id, modified_damage.round() as i16)
 }
 
-fn vine_whip(state_box: &mut Box<State>, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn vine_whip(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;

@@ -9,13 +9,7 @@ print-battle = []
 
 [dependencies]
 almost = "0.2.0"
-coarse-prof = "0.2.4"
-#lazy_static = "1.4.0"
 rand = "0.7.3"
-
-#[dependencies.tcmalloc]
-#version = "0.3.0"
-#features = ["bundled"]
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3.2"

@@ -129,7 +129,7 @@ impl MoveInstance {
     }
 }
 
-pub fn calculated_stat(state_box: &Box<State>, pokemon_id: u8, stat_index: StatIndex) -> u32 {
+pub fn calculated_stat(state_box: &State, pokemon_id: u8, stat_index: StatIndex) -> u32 {
     let pokemon = &state_box.pokemon[pokemon_id as usize];
 
     if stat_index == StatIndex::Hp { return pokemon.max_hp as u32; }
@@ -180,7 +180,7 @@ pub fn add_to_field(state_box: &mut Box<State>, pokemon_id: u8, field_position: 
     state_box.battle_end_check()
 }
 
-fn remove_from_field(state_box: &mut Box<State>, pokemon_id: u8) {
+fn remove_from_field(state_box: &mut State, pokemon_id: u8) {
     remove_minor_status_ailments(state_box, pokemon_id);
 
     let old_field_pos;
@@ -225,7 +225,7 @@ fn remove_from_field(state_box: &mut Box<State>, pokemon_id: u8) {
     }
 }
 
-pub fn increment_stat_stage(state_box: &mut Box<State>, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
+pub fn increment_stat_stage(state_box: &mut State, pokemon_id: u8, stat_index: StatIndex, requested_amount: i8) {
     let old_stat_stage;
     let new_stat_stage;
     {
@@ -277,7 +277,7 @@ pub fn increment_msa_counter(state_box: &mut Box<State>, pokemon_id: u8) {
 }
 
 /// The amount can be negative to add HP.
-pub fn apply_damage(state_box: &mut Box<State>, pokemon_id: u8, amount: i16) -> bool {
+pub fn apply_damage(state_box: &mut State, pokemon_id: u8, amount: i16) -> bool {
     let new_hp = state_box.pokemon[pokemon_id as usize].current_hp as i16 - amount;
     if new_hp <= 0 {
         state_box.pokemon[pokemon_id as usize].current_hp = 0;
@@ -294,7 +294,7 @@ pub fn apply_damage(state_box: &mut Box<State>, pokemon_id: u8, amount: i16) -> 
     false
 }
 
-fn remove_minor_status_ailments(state_box: &mut Box<State>, pokemon_id: u8) {
+fn remove_minor_status_ailments(state_box: &mut State, pokemon_id: u8) {
     let pokemon = &mut state_box.pokemon[pokemon_id as usize];
     pokemon.confusion_turn_inflicted = None;
     pokemon.confusion_turn_will_cure = None;

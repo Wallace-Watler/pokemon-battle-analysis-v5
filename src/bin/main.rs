@@ -1,5 +1,5 @@
-// #[cfg(not(target_env = "msvc"))]
-// use jemallocator::Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+use jemallocator::Jemalloc;
 
 use pokemon_battle_analysis_v5::{GameVersion, state};
 use pokemon_battle_analysis_v5::move_;
@@ -9,9 +9,9 @@ use pokemon_battle_analysis_v5::state::State;
 use rand::SeedableRng;
 use rand::prelude::StdRng;
 
-// #[cfg(not(target_env = "msvc"))]
-// #[global_allocator]
-// static GLOBAL: Jemalloc = Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 //use tcmalloc::TCMalloc;
 
@@ -63,5 +63,4 @@ fn main() {
     state::run_battle_v2(test_state(), &mut rng);
 
     println!();
-    coarse_prof::write(&mut std::io::stdout()).unwrap();
 }

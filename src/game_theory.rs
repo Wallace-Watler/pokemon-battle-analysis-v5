@@ -1,6 +1,5 @@
-use std::fmt::{Formatter, Error, Debug};
 use std::f64;
-use coarse_prof::profile;
+use std::fmt::{Debug, Error, Formatter};
 
 #[derive(Debug)]
 pub struct ZeroSumNashEq {
@@ -9,7 +8,7 @@ pub struct ZeroSumNashEq {
     /// The minimizing player's strategy at equilibrium.
     pub min_player_strategy: Vec<f64>,
     /// The expected payoff for the maximizing player at equilibrium.
-    pub expected_payoff: f64
+    pub expected_payoff: f64,
 }
 
 /// Calculates the Nash equilibrium of a zero-sum payoff matrix.
@@ -130,8 +129,9 @@ pub trait IsMatrix<T> {
     fn num_rows(&self) -> usize;
     fn num_cols(&self) -> usize;
 
+    #[inline(always)]
     fn flat_index(&self, i: usize, j: usize) -> usize {
-        if i >= self.num_rows() || j >= self.num_cols() { panic!("Matrix indices out of bounds."); }
+        debug_assert!(i < self.num_rows() && j < self.num_cols(), "Matrix indices out of bounds.");
         i * self.num_cols() + j
     }
 
@@ -143,6 +143,7 @@ pub trait IsMatrix<T> {
         &self.entries()[self.flat_index(i, j)]
     }
 
+    #[inline(always)]
     fn get_mut(&mut self, i: usize, j: usize) -> &mut T {
         let flat_index = self.flat_index(i, j);
         self.entries_mut().get_mut(flat_index).unwrap()
@@ -187,22 +188,21 @@ pub trait MatrixF64: IsMatrix<f64> + Debug {
     }
 }
 
-fn regular_pivot(matrix: &mut dyn MatrixF64, pivot_row: usize, pivot_col: usize) {
+#[inline(always)]
+fn regular_pivot<T>(matrix: &mut T, pivot_row: usize, pivot_col: usize) where T: MatrixF64 {
     let pivot = matrix.getf(pivot_row, pivot_col);
-    if almost::zero(pivot) {
-        println!("{:?}", matrix);
-        panic!(format!("Pivot element ({}, {}) is zero.", pivot_row, pivot_col));
-    }
+    debug_assert!(!almost::zero(pivot), "Pivot element ({}, {}) is zero.", pivot_row, pivot_col);
 
     for j in 0..matrix.num_cols() {
         *matrix.get_mut(pivot_row, j) /= pivot;
     }
+
     for i in 0..matrix.num_rows() {
         if i != pivot_row {
             let tableau_i_pivot_col = matrix.getf(i, pivot_col);
             if !almost::zero(tableau_i_pivot_col) {
                 for j in 0..matrix.num_cols() {
-                    *matrix.get_mut(i, j) = matrix.getf(i, j) - matrix.getf(pivot_row, j) * tableau_i_pivot_col
+                    *matrix.get_mut(i, j) -= matrix.getf(pivot_row, j) * tableau_i_pivot_col
                 }
             }
         }
@@ -212,7 +212,7 @@ fn regular_pivot(matrix: &mut dyn MatrixF64, pivot_row: usize, pivot_col: usize)
 pub struct Matrix<T> {
     entries: Vec<T>,
     num_rows: usize,
-    num_cols: usize
+    num_cols: usize,
 }
 
 impl<T> Matrix<T> {
@@ -222,7 +222,7 @@ impl<T> Matrix<T> {
         Matrix {
             entries,
             num_rows,
-            num_cols
+            num_cols,
         }
     }
 }
@@ -261,7 +261,7 @@ pub struct Tableau {
     /// Whether each column of the matrix is a basis column; length is always `matrix.num_cols() - 1`.
     col_is_basis: Vec<bool>,
     /// The basis column for each row; length is always `num_rows`.
-    basis_col: Vec<Option<usize>>
+    basis_col: Vec<Option<usize>>,
 }
 
 impl Tableau {
@@ -271,7 +271,7 @@ impl Tableau {
         Tableau {
             matrix,
             col_is_basis,
-            basis_col
+            basis_col,
         }
     }
 
@@ -307,18 +307,22 @@ impl Tableau {
 }
 
 impl IsMatrix<f64> for Tableau {
+    #[inline(always)]
     fn entries(&self) -> &[f64] {
         self.matrix.entries()
     }
 
+    #[inline(always)]
     fn entries_mut(&mut self) -> &mut [f64] {
         self.matrix.entries_mut()
     }
 
+    #[inline(always)]
     fn num_rows(&self) -> usize {
         self.matrix.num_rows()
     }
 
+    #[inline(always)]
     fn num_cols(&self) -> usize {
         self.matrix.num_cols()
     }
@@ -356,7 +360,7 @@ impl Debug for Tableau {
 pub struct MathMatrix {
     entries: Vec<f64>,
     num_rows: usize,
-    num_cols: usize
+    num_cols: usize,
 }
 
 impl MathMatrix {
@@ -366,7 +370,7 @@ impl MathMatrix {
         MathMatrix {
             entries,
             num_rows,
-            num_cols
+            num_cols,
         }
     }
 
@@ -375,7 +379,7 @@ impl MathMatrix {
         MathMatrix {
             entries: vec![fill; num_rows * num_cols],
             num_rows,
-            num_cols
+            num_cols,
         }
     }
 
@@ -389,35 +393,33 @@ impl MathMatrix {
         result
     }
 
-    fn without_row(&self, i: usize) -> MathMatrix {
+    fn _without_row(&self, i: usize) -> MathMatrix {
         let mut result = self.clone();
         result.del_row(i);
         result
     }
 
-    fn without_col(&self, j: usize) -> MathMatrix {
+    fn _without_col(&self, j: usize) -> MathMatrix {
         let mut result = self.clone();
         result.del_col(j);
         result
     }
 
     pub fn row_col_restricted(&self, row_exclusion: &[bool], col_exclusion: &[bool]) -> MathMatrix {
-        profile!("row_col_restricted");
-
-        if row_exclusion.len() != self.num_rows() || col_exclusion.len() != self.num_cols() {
-            panic!("Row and column exclusions must match matrix dimensions.");
-        }
+        debug_assert!(row_exclusion.len() == self.num_rows()
+                          && col_exclusion.len() == self.num_cols(),
+                      "Row and column exclusions must match matrix dimensions.");
 
         let m = self.num_rows() - row_exclusion.iter().filter(|b| **b).count();
         let n = self.num_cols() - col_exclusion.iter().filter(|b| **b).count();
         let mut result = MathMatrix::of(0.0, m, n);
 
         let mut i_r = 0;
-        for i in 0..self.num_rows() {
-            if !row_exclusion[i] {
+        for (i, item) in row_exclusion.iter().enumerate() {
+            if !*item {
                 let mut j_r = 0;
-                for j in 0..self.num_cols() {
-                    if !col_exclusion[j] {
+                for (j, item) in col_exclusion.iter().enumerate().take(self.num_cols()) {
+                    if !*item {
                         *result.get_mut(i_r, j_r) = self.getf(i, j);
                         j_r += 1;
                     }
@@ -449,18 +451,22 @@ impl MathMatrix {
 }
 
 impl IsMatrix<f64> for MathMatrix {
+    #[inline(always)]
     fn entries(&self) -> &[f64] {
         &self.entries
     }
 
+    #[inline(always)]
     fn entries_mut(&mut self) -> &mut [f64] {
         &mut self.entries
     }
 
+    #[inline(always)]
     fn num_rows(&self) -> usize {
         self.num_rows
     }
 
+    #[inline(always)]
     fn num_cols(&self) -> usize {
         self.num_cols
     }
@@ -514,7 +520,6 @@ pub fn simplex_phase2(tableau: &mut Tableau) {
 }
 
 #[allow(clippy::many_single_char_names)]
-#[allow(clippy::needless_range_loop)]
 pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     let m = a.num_rows();
     let n = a.num_cols();
@@ -524,16 +529,17 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     let mut is_col_basis = vec![false; tableau_mat.num_cols() - 1];
     let mut basis_col = vec![None; tableau_mat.num_rows()];
 
-    for j in 0..n {
-        *tableau_mat.get_mut(1, j) = -c[j];
+    for (j, item) in c.iter().enumerate().take(n) {
+        *tableau_mat.get_mut(1, j) = -*item;
         *tableau_mat.get_mut(tableau_mat.num_rows() - 1, j) = 1.0;
         for i in 0..m {
             *tableau_mat.get_mut(i + 2, j) = a.getf(i, j);
         }
     }
-    for i in 0..m {
-        *tableau_mat.get_mut(i + 2, tableau_mat.num_cols() - 1) = b[i];
+    for (i, item) in b.iter().enumerate().take(m) {
+        *tableau_mat.get_mut(i + 2, tableau_mat.num_cols() - 1) = *item;
     }
+
     for j in 0..m {
         *tableau_mat.get_mut(j + 2, j + n) = 1.0;
         is_col_basis[j + n] = true;
@@ -599,8 +605,6 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
 }
 
 pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, alpha: f64) -> f64 {
-    profile!("alpha_child");
-
     let mut p_t = pessimistic_bounds_wo_domination.clone();
     p_t.set_row(a, alpha);
     let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.getf(i, b)).collect();
@@ -629,8 +633,6 @@ pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMa
 
 #[allow(clippy::many_single_char_names)]
 pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, beta: f64) -> f64 {
-    profile!("beta_child");
-
     let mut o = optimistic_bounds_wo_domination.clone();
     o.set_col(b, beta);
     let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.getf(a, j)).collect();

@@ -1,13 +1,12 @@
 use std::cmp::{max, min};
 
+use rand::prelude::StdRng;
 use rand::Rng;
 
-use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, pokemon, Terrain, Weather, game_theory};
+use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilment, pokemon, Terrain, Weather};
+use crate::game_theory::{IsMatrix, MathMatrix, Matrix, ZeroSumNashEq};
 use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
-use crate::game_theory::{ZeroSumNashEq, MathMatrix, IsMatrix, Matrix};
-use rand::prelude::StdRng;
-use coarse_prof::profile;
 
 pub const AI_LEVEL: u8 = 3;
 
@@ -25,9 +24,10 @@ pub struct State {
     pub turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
     pub display_text: Vec<String>,
-    pub children: Vec<Box<State>>, // TODO: Try unboxing
+    pub children: Vec<Box<State>>,
+    // TODO: Try unboxing
     pub num_maximizer_actions: usize,
-    pub num_minimizer_actions: usize
+    pub num_minimizer_actions: usize,
 }
 
 impl State {
@@ -49,7 +49,7 @@ impl State {
             display_text: Vec::new(),
             children: Vec::new(),
             num_maximizer_actions: 0,
-            num_minimizer_actions: 0
+            num_minimizer_actions: 0,
         }
     }
 
@@ -66,8 +66,6 @@ impl State {
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
 pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
-    profile!("run_battle");
-
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -105,8 +103,6 @@ pub fn run_battle(state: State, rng: &mut StdRng) -> f64 {
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
 pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
-    profile!("run_battle_v2");
-
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -134,8 +130,6 @@ pub fn run_battle_v2(state: State, rng: &mut StdRng) -> f64 {
 
 /// Returns how many extra recursions should be done for the state's subtree.
 fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> u8 {
-    profile!("generate_immediate_children");
-
     match state_box.min_pokemon_id.zip(state_box.max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
             match state_box.min_pokemon_id.xor(state_box.max_pokemon_id) {
@@ -161,7 +155,7 @@ fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> 
                         state_box.num_maximizer_actions = choices.len();
                         state_box.num_minimizer_actions = 1;
                     }
-                },
+                }
                 None => { // Both agents must choose
                     let minimizer_choices: Vec<_> = (0..6)
                         .filter(|id| state_box.pokemon[*id as usize].current_hp > 0)
@@ -188,7 +182,7 @@ fn generate_immediate_children(state_box: &mut Box<State>, rng: &mut StdRng) -> 
 
             // This choice doesn't provide much information and its computational cost is relatively small, so do an extra recursion.
             1
-        },
+        }
         Some((min_pokemon_id, max_pokemon_id)) => { // Agents must choose actions for each Pokemon
             // TODO: Rule out actions that are obviously not optimal to reduce search size
             let mut generate_move_actions = |user_id: u8| -> Vec<MoveAction> {
@@ -275,7 +269,7 @@ fn build_state_tree(root: &mut Box<State>, mut recursions: u8, rng: &mut StdRng)
 }
 
 /// Recursively computes the heuristic value of a state.
-fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
+fn heuristic_value(state_box: &State) -> ZeroSumNashEq {
     if state_box.children.is_empty() {
         ZeroSumNashEq {
             max_player_strategy: Vec::new(),
@@ -296,8 +290,6 @@ fn heuristic_value(state_box: &Box<State>) -> ZeroSumNashEq {
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 // TODO: Order moves/children so that pruning is most likely to occur
 fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
-    profile!("smab_search");
-
     if recursions < 1 {
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
@@ -324,12 +316,13 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
     let mut row_domination = vec![false; num_max_actions];
     let mut col_domination = vec![false; num_min_actions];
 
-    let mut ab_coords = Vec::new();
+    let mut ab_coords = Vec::with_capacity(num_max_actions * num_min_actions);
     for i in 0..num_max_actions {
         for j in 0..num_min_actions {
             ab_coords.push((i, j));
         }
     }
+
     let mut ij_to_ab_map = Matrix::from(ab_coords, num_max_actions, num_min_actions);
 
     let mut explore_child = |i: usize, j: usize| {
@@ -393,13 +386,13 @@ fn smab_search(state_box: &mut Box<State>, alpha: f64, beta: f64, mut recursions
         ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
-            expected_payoff: alpha
+            expected_payoff: alpha,
         }
     } else if col_domination.iter().all(|b| *b) {
         ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
-            expected_payoff: beta
+            expected_payoff: beta,
         }
     } else {
         game_theory::calc_nash_eq(&pessimistic_bounds, &row_domination, &col_domination, 2.0)
