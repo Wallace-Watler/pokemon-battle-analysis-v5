@@ -15,7 +15,7 @@ pub struct ZeroSumNashEq {
 /// The algorithm follows [Game Theory](docs/Game_Theory.pdf), section 4.5.
 /// It requires that all elements be positive, so supply `added_constant` to ensure this; it will
 /// not affect the equilibrium.
-pub fn calc_nash_eq(payoff_matrix: &MathMatrix, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq {
+pub fn calc_nash_eq<T>(payoff_matrix: &T, row_domination: &[bool], col_domination: &[bool], added_constant: f64) -> ZeroSumNashEq where T: MatrixF64 {
     debug_assert!(row_domination.len() == payoff_matrix.num_rows() as usize && col_domination.len() == payoff_matrix.num_cols() as usize, "Domination labels must match the payoff matrix shape.");
 
     let m = payoff_matrix.num_rows() - row_domination.iter().filter(|b| **b).count();
@@ -122,10 +122,13 @@ pub fn calc_nash_eq(payoff_matrix: &MathMatrix, row_domination: &[bool], col_dom
 }
 
 pub trait IsMatrix<T> {
+    fn of(fill: T, num_rows: usize, num_cols: usize) -> Self where T: Clone;
     fn entries(&self) -> &[T];
     fn entries_mut(&mut self) -> &mut [T];
     fn num_rows(&self) -> usize;
     fn num_cols(&self) -> usize;
+    fn del_row(&mut self, i: usize);
+    fn del_col(&mut self, j: usize);
 
     #[inline(always)]
     fn flat_index(&self, i: usize, j: usize) -> usize {
@@ -227,6 +230,15 @@ impl<T> Matrix<T> {
 }
 
 impl<T> IsMatrix<T> for Matrix<T> {
+    fn of(fill: T, num_rows: usize, num_cols: usize) -> Self where T: Clone {
+        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
+        Matrix {
+            entries: vec![fill; num_rows * num_cols],
+            num_rows,
+            num_cols,
+        }
+    }
+
     fn entries(&self) -> &[T] {
         &self.entries
     }
@@ -241,6 +253,34 @@ impl<T> IsMatrix<T> for Matrix<T> {
 
     fn num_cols(&self) -> usize {
         self.num_cols
+    }
+
+    fn del_row(&mut self, i: usize) {
+        let del_from = self.flat_index(i, 0);
+        let del_to = self.flat_index(i, self.num_cols - 1);
+        self.entries.drain(del_from..=del_to);
+        self.num_rows -= 1;
+    }
+
+    fn del_col(&mut self, j: usize) {
+        let del_from = self.flat_index(0, j) as isize;
+        let del_to = self.flat_index(self.num_rows - 1, j) as isize;
+        let mut del_index = del_to;
+        while del_index >= del_from {
+            self.entries.remove(del_index as usize);
+            del_index -= self.num_cols as isize;
+        }
+        self.num_cols -= 1;
+    }
+}
+
+impl<T> Clone for Matrix<T> where T: Clone {
+    fn clone(&self) -> Self {
+        Matrix {
+            entries: self.entries.clone(),
+            num_rows: self.num_rows,
+            num_cols: self.num_cols
+        }
     }
 }
 
@@ -285,27 +325,13 @@ impl Tableau {
     pub fn basis_col(&self) -> &[Option<usize>] {
         &self.basis_col
     }
-
-    pub fn del_row(&mut self, i: usize) {
-        self.matrix.del_row(i);
-        if let Some(basis_col) = *self.basis_col().get(i).unwrap() {
-            self.col_is_basis_mut()[basis_col] = false;
-        }
-        self.basis_col.remove(i);
-    }
-
-    pub fn del_col(&mut self, j: usize) {
-        self.matrix.del_col(j);
-        self.col_is_basis.remove(j);
-        for i in 0..self.basis_col.len() {
-            if self.basis_col[i] == Some(j) {
-                self.basis_col[i] = None;
-            }
-        }
-    }
 }
 
 impl IsMatrix<f64> for Tableau {
+    fn of(_fill: f64, _num_rows: usize, _num_cols: usize) -> Self {
+        unimplemented!();
+    }
+
     #[inline(always)]
     fn entries(&self) -> &[f64] {
         self.matrix.entries()
@@ -324,6 +350,24 @@ impl IsMatrix<f64> for Tableau {
     #[inline(always)]
     fn num_cols(&self) -> usize {
         self.matrix.num_cols()
+    }
+
+    fn del_row(&mut self, i: usize) {
+        self.matrix.del_row(i);
+        if let Some(basis_col) = *self.basis_col().get(i).unwrap() {
+            self.col_is_basis_mut()[basis_col] = false;
+        }
+        self.basis_col.remove(i);
+    }
+
+    fn del_col(&mut self, j: usize) {
+        self.matrix.del_col(j);
+        self.col_is_basis.remove(j);
+        for i in 0..self.basis_col.len() {
+            if self.basis_col[i] == Some(j) {
+                self.basis_col[i] = None;
+            }
+        }
     }
 }
 
@@ -373,15 +417,6 @@ impl MathMatrix {
         }
     }
 
-    pub fn of(fill: f64, num_rows: usize, num_cols: usize) -> MathMatrix {
-        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
-        MathMatrix {
-            entries: vec![fill; num_rows * num_cols],
-            num_rows,
-            num_cols,
-        }
-    }
-
     fn transposed(&self) -> MathMatrix {
         let mut result = MathMatrix::of(0.0, self.num_cols(), self.num_rows());
         for i in 0..self.num_rows() {
@@ -389,18 +424,6 @@ impl MathMatrix {
                 *result.get_mut(j, i) = self.getf(i, j);
             }
         }
-        result
-    }
-
-    fn _without_row(&self, i: usize) -> MathMatrix {
-        let mut result = self.clone();
-        result.del_row(i);
-        result
-    }
-
-    fn _without_col(&self, j: usize) -> MathMatrix {
-        let mut result = self.clone();
-        result.del_col(j);
         result
     }
 
@@ -415,7 +438,7 @@ impl MathMatrix {
         for (i, &row_excluded) in row_exclusion.iter().enumerate() {
             if !row_excluded {
                 let mut j_r = 0;
-                for (j, &col_excluded) in col_exclusion.iter().enumerate().take(self.num_cols()) {
+                for (j, &col_excluded) in col_exclusion.iter().enumerate() {
                     if !col_excluded {
                         *result.get_mut(i_r, j_r) = self.getf(i, j);
                         j_r += 1;
@@ -427,27 +450,18 @@ impl MathMatrix {
 
         result
     }
-
-    pub fn del_row(&mut self, i: usize) {
-        let del_from = self.flat_index(i, 0);
-        let del_to = self.flat_index(i, self.num_cols - 1);
-        self.entries.drain(del_from..=del_to);
-        self.num_rows -= 1;
-    }
-
-    pub fn del_col(&mut self, j: usize) {
-        let del_from = self.flat_index(0, j) as isize;
-        let del_to = self.flat_index(self.num_rows - 1, j) as isize;
-        let mut del_index = del_to;
-        while del_index >= del_from {
-            self.entries.remove(del_index as usize);
-            del_index -= self.num_cols as isize;
-        }
-        self.num_cols -= 1;
-    }
 }
 
 impl IsMatrix<f64> for MathMatrix {
+    fn of(fill: f64, num_rows: usize, num_cols: usize) -> Self {
+        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
+        MathMatrix {
+            entries: vec![fill; num_rows * num_cols],
+            num_rows,
+            num_cols,
+        }
+    }
+
     #[inline(always)]
     fn entries(&self) -> &[f64] {
         &self.entries
@@ -466,6 +480,24 @@ impl IsMatrix<f64> for MathMatrix {
     #[inline(always)]
     fn num_cols(&self) -> usize {
         self.num_cols
+    }
+
+    fn del_row(&mut self, i: usize) {
+        let del_from = self.flat_index(i, 0);
+        let del_to = self.flat_index(i, self.num_cols - 1);
+        self.entries.drain(del_from..=del_to);
+        self.num_rows -= 1;
+    }
+
+    fn del_col(&mut self, j: usize) {
+        let del_from = self.flat_index(0, j) as isize;
+        let del_to = self.flat_index(self.num_rows - 1, j) as isize;
+        let mut del_index = del_to;
+        while del_index >= del_from {
+            self.entries.remove(del_index as usize);
+            del_index -= self.num_cols as isize;
+        }
+        self.num_cols -= 1;
     }
 }
 
@@ -603,7 +635,27 @@ pub fn simplex_phase1(a: &MathMatrix, b: &[f64], c: &[f64]) -> Option<Tableau> {
     Some(tableau)
 }
 
-pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, alpha: f64) -> f64 {
+pub fn alpha_child(a: usize, b: usize, child_values_wo_domination: &Matrix<Option<f64>>, alpha: f64) -> f64 {
+    let pessimistic_bounds_wo_domination_entries = child_values_wo_domination.entries().iter().map(|value| {
+        match value {
+            Some(value) => {
+                if value.is_nan() { -1.0 } else { *value }
+            },
+            None => -1.0
+        }
+    }).collect::<Vec<f64>>();
+    let pessimistic_bounds_wo_domination = MathMatrix::from(pessimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
+
+    let optimistic_bounds_wo_domination_entries = child_values_wo_domination.entries().iter().map(|value| {
+        match value {
+            Some(value) => {
+                if value.is_nan() { -1.0 } else { *value }
+            },
+            None => 1.0
+        }
+    }).collect::<Vec<f64>>();
+    let optimistic_bounds_wo_domination = MathMatrix::from(optimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
+
     let mut p_t = pessimistic_bounds_wo_domination.clone();
     p_t.set_row(a, alpha);
     let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.getf(i, b)).collect();
@@ -629,7 +681,27 @@ pub fn alpha_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMa
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn beta_child(a: usize, b: usize, pessimistic_bounds_wo_domination: &MathMatrix, optimistic_bounds_wo_domination: &MathMatrix, beta: f64) -> f64 {
+pub fn beta_child(a: usize, b: usize, child_values_wo_domination: &Matrix<Option<f64>>, beta: f64) -> f64 {
+    let pessimistic_bounds_wo_domination_entries = child_values_wo_domination.entries().iter().map(|value| {
+        match value {
+            Some(value) => {
+                if value.is_nan() { 1.0 } else { *value }
+            },
+            None => -1.0
+        }
+    }).collect::<Vec<f64>>();
+    let pessimistic_bounds_wo_domination = MathMatrix::from(pessimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
+
+    let optimistic_bounds_wo_domination_entries = child_values_wo_domination.entries().iter().map(|value| {
+        match value {
+            Some(value) => {
+                if value.is_nan() { 1.0 } else { *value }
+            },
+            None => 1.0
+        }
+    }).collect::<Vec<f64>>();
+    let optimistic_bounds_wo_domination = MathMatrix::from(optimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
+
     let mut o = optimistic_bounds_wo_domination.clone();
     o.set_col(b, beta);
     let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.getf(a, j)).collect();

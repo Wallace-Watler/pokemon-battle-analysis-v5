@@ -7,6 +7,7 @@ use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilmen
 use crate::game_theory::{IsMatrix, MathMatrix, Matrix, ZeroSumNashEq};
 use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
+use std::f64::NAN;
 
 pub const AI_LEVEL: u8 = 3;
 
@@ -305,9 +306,8 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
     let num_max_actions = state.num_maximizer_actions;
     let num_min_actions = state.num_minimizer_actions;
 
-    // Min and max possible values of child states.
-    let mut pessimistic_bounds = MathMatrix::of(-1.0, num_max_actions, num_min_actions);
-    let mut optimistic_bounds = MathMatrix::of(1.0, num_max_actions, num_min_actions);
+    let mut child_values = Matrix::of(None, num_max_actions, num_min_actions);
+    let mut child_values_wo_domination = child_values.clone();
 
     let mut row_domination = vec![false; num_max_actions];
     let mut col_domination = vec![false; num_min_actions];
@@ -323,46 +323,34 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
 
     let mut explore_child = |i: usize, j: usize| {
         if !row_domination[i] && !col_domination[j] {
-            // TODO: Just copy the bound matrices and remove rows/cols as needed?
             let (a, b) = ij_to_ab_map.get(i, j);
-            let pessimistic_bounds_wo_domination = pessimistic_bounds.row_col_restricted(&row_domination, &col_domination);
-            let optimistic_bounds_wo_domination = optimistic_bounds.row_col_restricted(&row_domination, &col_domination);
-            let alpha_child = game_theory::alpha_child(*a, *b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, alpha);
-            let beta_child = game_theory::beta_child(*a, *b, &pessimistic_bounds_wo_domination, &optimistic_bounds_wo_domination, beta);
+            let alpha_child = game_theory::alpha_child(*a, *b, &child_values_wo_domination, alpha);
+            let beta_child = game_theory::beta_child(*a, *b, &child_values_wo_domination, beta);
             let child_index = i * num_min_actions + j;
 
             if alpha_child >= beta_child {
-                const EPSILON: f64 = 0.0; // TODO: How small should epsilon be?
-                let value = smab_search(&mut state.children[child_index], alpha_child, alpha_child + EPSILON, recursions - 1, rng).expected_payoff;
-                if value <= alpha_child {
-                    row_domination[i] = true;
-                } else {
-                    col_domination[j] = true;
-                }
+                *child_values_wo_domination.get_mut(*a, *b) = Some(NAN);
             } else {
                 let value = smab_search(&mut state.children[child_index], alpha_child, beta_child, recursions - 1, rng).expected_payoff;
                 if value <= alpha_child {
                     row_domination[i] = true;
+                    child_values_wo_domination.del_row(*a);
+                    for x in (i + 1)..ij_to_ab_map.num_rows() {
+                        for y in 0..ij_to_ab_map.num_cols() {
+                            ij_to_ab_map.get_mut(x, y).0 -= 1
+                        }
+                    }
                 } else if value >= beta_child {
                     col_domination[j] = true;
+                    child_values_wo_domination.del_col(*b);
+                    for x in 0..ij_to_ab_map.num_rows() {
+                        for y in (j + 1)..ij_to_ab_map.num_cols() {
+                            ij_to_ab_map.get_mut(x, y).1 -= 1
+                        }
+                    }
                 } else {
-                    *pessimistic_bounds.get_mut(i, j) = value;
-                    *optimistic_bounds.get_mut(i, j) = value;
-                }
-            }
-
-            if row_domination[i] {
-                for x in (i + 1)..ij_to_ab_map.num_rows() {
-                    for y in 0..ij_to_ab_map.num_cols() {
-                        ij_to_ab_map.get_mut(x, y).0 -= 1
-                    }
-                }
-            }
-            if col_domination[j] {
-                for x in 0..ij_to_ab_map.num_rows() {
-                    for y in (j + 1)..ij_to_ab_map.num_cols() {
-                        ij_to_ab_map.get_mut(x, y).1 -= 1
-                    }
+                    *child_values.get_mut(i, j) = Some(value);
+                    *child_values_wo_domination.get_mut(*a, *b) = Some(value);
                 }
             }
         }
@@ -391,7 +379,14 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
             expected_payoff: beta,
         }
     } else {
-        game_theory::calc_nash_eq(&pessimistic_bounds, &row_domination, &col_domination, 2.0)
+        let payoff_matrix_entries = child_values.entries().iter().map(|value| {
+            match value {
+                Some(value) => *value,
+                _ => NAN
+            }
+        }).collect::<Vec<f64>>();
+        let payoff_matrix = MathMatrix::from(payoff_matrix_entries, num_max_actions, num_min_actions);
+        game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0)
     }
 }
 
