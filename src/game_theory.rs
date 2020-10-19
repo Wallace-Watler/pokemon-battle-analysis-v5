@@ -644,7 +644,6 @@ pub fn alpha_child(a: usize, b: usize, child_values_wo_domination: &Matrix<Optio
             None => -1.0
         }
     }).collect::<Vec<f64>>();
-    let pessimistic_bounds_wo_domination = MathMatrix::from(pessimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
 
     let optimistic_bounds_wo_domination_entries = child_values_wo_domination.entries().iter().map(|value| {
         match value {
@@ -656,7 +655,7 @@ pub fn alpha_child(a: usize, b: usize, child_values_wo_domination: &Matrix<Optio
     }).collect::<Vec<f64>>();
     let optimistic_bounds_wo_domination = MathMatrix::from(optimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
 
-    let mut p_t = pessimistic_bounds_wo_domination.clone();
+    let mut p_t = MathMatrix::from(pessimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
     p_t.set_row(a, alpha);
     let e: Vec<f64> = (0..p_t.num_rows()).map(|i| p_t.getf(i, b)).collect();
     p_t.del_col(b);
@@ -700,9 +699,8 @@ pub fn beta_child(a: usize, b: usize, child_values_wo_domination: &Matrix<Option
             None => 1.0
         }
     }).collect::<Vec<f64>>();
-    let optimistic_bounds_wo_domination = MathMatrix::from(optimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
 
-    let mut o = optimistic_bounds_wo_domination.clone();
+    let mut o = MathMatrix::from(optimistic_bounds_wo_domination_entries, child_values_wo_domination.num_rows(), child_values_wo_domination.num_cols());
     o.set_col(b, beta);
     let e: Vec<f64> = (0..o.num_cols()).map(|j| -o.getf(a, j)).collect();
     o.del_row(a);

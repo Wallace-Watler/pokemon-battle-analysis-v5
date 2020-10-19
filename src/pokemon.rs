@@ -2,7 +2,7 @@ use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
 
 use crate::{Ability, FieldPosition, game_version, Gender, MajorStatusAilment, Nature, StatIndex, Type, Weather, clamp};
-use crate::move_::{MoveAction, Move};
+use crate::move_::{Move, Action};
 use crate::species::Species;
 use crate::state::State;
 
@@ -46,7 +46,7 @@ pub struct Pokemon {
     // Moves
     pub known_moves: Vec<MoveInstance>,
     /// Needed for handling two-turn moves.
-    pub next_move_action: Option<MoveAction>
+    pub next_move_action: Option<Action>
 }
 
 impl Pokemon {
@@ -180,7 +180,7 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
     state.battle_end_check()
 }
 
-fn remove_from_field(state_box: &mut State, pokemon_id: u8) {
+pub fn remove_from_field(state_box: &mut State, pokemon_id: u8) {
     remove_minor_status_ailments(state_box, pokemon_id);
 
     let old_field_pos;

@@ -1,13 +1,15 @@
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 
 use rand::prelude::StdRng;
 use rand::Rng;
 
 use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilment, pokemon, Terrain, Weather};
 use crate::game_theory::{IsMatrix, MathMatrix, Matrix, ZeroSumNashEq};
-use crate::move_::MoveAction;
 use crate::pokemon::Pokemon;
 use std::f64::NAN;
+use std::borrow::Borrow;
+use crate::move_::Action;
+use crate::move_;
 
 pub const AI_LEVEL: u8 = 3;
 
@@ -125,8 +127,20 @@ pub fn run_battle_smab(mut state: State, rng: &mut StdRng) -> f64 {
     nash_eq.expected_payoff
 }
 
-/// Returns how many extra recursions should be done for the state's subtree.
-fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
+fn build_state_tree(root: &mut State, recursions: u8, rng: &mut StdRng) {
+    if recursions < 1 { return; }
+
+    if root.children.is_empty() {
+        generate_immediate_children(root, rng);
+    }
+
+    // If children is still empty, battle has ended
+    for child in &mut root.children {
+        build_state_tree(child, recursions - 1, rng);
+    }
+}
+
+fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
     match state.min_pokemon_id.zip(state.max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
             match state.min_pokemon_id.xor(state.max_pokemon_id) {
@@ -152,7 +166,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
                         state.num_maximizer_actions = choices.len();
                         state.num_minimizer_actions = 1;
                     }
-                }
+                },
                 None => { // Both agents must choose
                     let minimizer_choices: Vec<_> = (0..6)
                         .filter(|id| state.pokemon[*id as usize].current_hp > 0)
@@ -176,20 +190,16 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
                     state.num_minimizer_actions = minimizer_choices.len();
                 }
             }
-
-            // This choice doesn't provide much information and its computational cost is relatively small, so do an extra recursion.
-            1
-        }
+        },
         Some((min_pokemon_id, max_pokemon_id)) => { // Agents must choose actions for each Pokemon
-            // TODO: Rule out actions that are obviously not optimal to reduce search size
-            let mut generate_move_actions = |user_id: u8| -> Vec<MoveAction> {
-                let mut user_actions: Vec<MoveAction> = Vec::with_capacity(4);
+            let mut generate_actions = |user_id: u8| -> Vec<Action> {
+                let mut actions: Vec<Action> = Vec::with_capacity(9);
 
                 if let Some(next_move_action) = state.pokemon[user_id as usize].next_move_action.clone() { // TODO: Is this actually what should happen?
                     if next_move_action.can_be_performed(state, rng) {
-                        user_actions.push(next_move_action);
+                        actions.push(next_move_action);
                         state.pokemon[user_id as usize].next_move_action = None;
-                        return user_actions;
+                        return actions;
                     } else {
                         state.pokemon[user_id as usize].next_move_action = None;
                     }
@@ -199,7 +209,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
                 for move_index in 0..user.known_moves.len() {
                     if user.can_choose_move(Some(move_index)) {
                         let move_ = user.known_moves[move_index].move_;
-                        user_actions.push(MoveAction {
+                        actions.push(Action::Move {
                             user_id,
                             move_,
                             move_index: Some(move_index as u8),
@@ -210,9 +220,9 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
                 }
 
                 // TODO: Can Struggle be used if switch actions are available?
-                if user_actions.is_empty() {
+                if actions.is_empty() {
                     let move_ = unsafe { &crate::move_::STRUGGLE };
-                    user_actions.push(MoveAction {
+                    actions.push(Action::Move {
                         user_id,
                         move_,
                         move_index: None,
@@ -221,47 +231,67 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) -> u8 {
                     });
                 }
 
-                // TODO: Exploring every switch action takes too long; maybe come up with some heuristic to decide when to switch?
-                /*
-                for(int teamMemberID : team.pokemonIDs) {
-                    Pokemon teamMember = pokemonByID(teamMemberID);
-                    if(teamMember.currentHP > 0 && teamMember.fieldPosition == null && Arrays.stream(teamMember.movePP).sum() > 0)
-                        userActions.add(new SwitchAction(teamMemberID, user.id));
-                }*/
+                for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
+                    let team_member: &Pokemon = state.pokemon[team_member_id].borrow();
+                    if team_member.current_hp > 0 && team_member.field_position == None && team_member.known_moves.iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
+                        actions.push(Action::Switch {
+                            user_id,
+                            switching_in_id: team_member_id as u8
+                        });
+                    }
+                }
 
-                user_actions
+                actions
             };
 
-            // TODO: Generate switch actions separately
-            let minimizer_move_actions: Vec<MoveAction> = generate_move_actions(min_pokemon_id);
-            let maximizer_move_actions: Vec<MoveAction> = generate_move_actions(max_pokemon_id);
+            let mut min_actions = generate_actions(min_pokemon_id);
+            let mut max_actions = generate_actions(max_pokemon_id);
 
-            for maximizer_move_action in &maximizer_move_actions {
-                for minimizer_move_action in &minimizer_move_actions {
+            min_actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2, state));
+            max_actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2, state));
+
+            for max_action in &max_actions {
+                for min_action in &min_actions {
                     let mut child = state.copy_game_state();
-                    play_out_turn(&mut child, vec![minimizer_move_action, maximizer_move_action], rng);
+                    play_out_turn(&mut child, vec![min_action, max_action], rng);
                     state.children.push(child);
                 }
             }
 
-            state.num_maximizer_actions = maximizer_move_actions.len();
-            state.num_minimizer_actions = minimizer_move_actions.len();
-
-            0
+            state.num_maximizer_actions = max_actions.len();
+            state.num_minimizer_actions = min_actions.len();
         }
     }
 }
 
-fn build_state_tree(root: &mut State, mut recursions: u8, rng: &mut StdRng) {
-    if recursions < 1 { return; }
-
-    if root.children.is_empty() {
-        recursions += generate_immediate_children(root, rng);
-    }
-
-    // If children is still empty, battle has ended
-    for child in &mut root.children {
-        build_state_tree(child, recursions - 1, rng);
+// TODO: Make better
+fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Ordering {
+    match act1 {
+        Action::Switch { .. } => {
+            match act2 {
+                Action::Switch { .. } => Ordering::Equal,
+                Action::Move { .. } => Ordering::Greater
+            }
+        },
+        Action::Move {user_id: _, move_: act1_move_, move_index: _, target_positions: _} => {
+            match act2 {
+                Action::Switch { .. } => Ordering::Less,
+                Action::Move {user_id: _, move_: act2_move_, move_index: _, target_positions: _} => {
+                    unsafe {
+                        if *act1_move_ == &move_::TACKLE && *act2_move_ == &move_::TACKLE { return Ordering::Equal; }
+                        if *act1_move_ == &move_::TACKLE && *act2_move_ != &move_::TACKLE { return Ordering::Less; }
+                        if *act1_move_ != &move_::TACKLE && *act2_move_ == &move_::TACKLE { return Ordering::Greater; }
+                        if *act1_move_ == &move_::GROWL && *act2_move_ == &move_::GROWL { return Ordering::Equal; }
+                        if *act1_move_ == &move_::GROWL && *act2_move_ != &move_::GROWL { return Ordering::Less; }
+                        if *act1_move_ != &move_::GROWL && *act2_move_ == &move_::GROWL { return Ordering::Greater; }
+                        if *act1_move_ == &move_::VINE_WHIP && *act2_move_ == &move_::VINE_WHIP { return Ordering::Equal; }
+                        if *act1_move_ == &move_::VINE_WHIP && *act2_move_ != &move_::VINE_WHIP { return Ordering::Less; }
+                        if *act1_move_ != &move_::VINE_WHIP && *act2_move_ == &move_::VINE_WHIP { return Ordering::Greater; }
+                        Ordering::Equal
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -286,7 +316,7 @@ fn heuristic_value(state_box: &State) -> ZeroSumNashEq {
 /// Simultaneous move alpha-beta search, implemented as per
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 // TODO: Order moves/children so that pruning is most likely to occur
-fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
+fn smab_search(state: &mut State, alpha: f64, beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
     if recursions < 1 {
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
@@ -297,7 +327,7 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
     }
 
     if state.children.is_empty() {
-        recursions += generate_immediate_children(state, rng);
+        generate_immediate_children(state, rng);
         if state.children.is_empty() { // If children is still empty, battle has ended.
             return smab_search(state, alpha, beta, 0, rng);
         }
@@ -324,8 +354,15 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
     let mut explore_child = |i: usize, j: usize| {
         if !row_domination[i] && !col_domination[j] {
             let (a, b) = ij_to_ab_map.get(i, j);
-            let alpha_child = game_theory::alpha_child(*a, *b, &child_values_wo_domination, alpha);
-            let beta_child = game_theory::beta_child(*a, *b, &child_values_wo_domination, beta);
+            let alpha_child;
+            let beta_child;
+            if *a == child_values_wo_domination.num_rows() - 1 || *b == child_values_wo_domination.num_cols() - 1 {
+                alpha_child = game_theory::alpha_child(*a, *b, &child_values_wo_domination, alpha);
+                beta_child = game_theory::beta_child(*a, *b, &child_values_wo_domination, beta);
+            } else {
+                alpha_child = -1.0;
+                beta_child = 1.0;
+            }
             let child_index = i * num_min_actions + j;
 
             if alpha_child >= beta_child {
@@ -391,20 +428,20 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, mut recursions: u8, rng
 }
 
 // TODO: Pass actions directly without using queues
-fn play_out_turn(state: &mut State, mut move_action_queue: Vec<&MoveAction>, rng: &mut StdRng) {
+fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut StdRng) {
     let turn_number = state.turn_number;
     if cfg!(feature = "print-battle") {
         state.display_text.push(format!("---- Turn {} ----", turn_number));
     }
 
-    if move_action_queue.len() == 2 && move_action_queue[1].outspeeds(state, move_action_queue[0], rng) {
-        move_action_queue.swap(0, 1);
+    if action_queue.len() == 2 && action_queue[1].outspeeds(state, action_queue[0], rng) {
+        action_queue.swap(0, 1);
     }
 
-    while !move_action_queue.is_empty() {
-        let move_action = move_action_queue.remove(0);
-        move_action.pre_move_stuff(state);
-        if move_action.can_be_performed(state, rng) && move_action.perform(state, &move_action_queue, rng) {
+    while !action_queue.is_empty() {
+        let action = action_queue.remove(0);
+        action.pre_action_stuff(state);
+        if action.can_be_performed(state, rng) && action.perform(state, &action_queue, rng) {
             return;
         }
     }

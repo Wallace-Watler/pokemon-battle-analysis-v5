@@ -67,105 +67,137 @@ impl MoveTargeting {
     }
 }
 
-/// A move selection that will be queued and executed during a turn.
+/// An action selection that will be queued and executed during a turn.
 #[derive(Clone, Debug)]
-pub struct MoveAction {
-    pub user_id: u8,
-    pub move_: &'static Move,
-    pub move_index: Option<u8>,
-    pub target_positions: Vec<FieldPosition>,
+pub enum Action {
+    /// An action where the user performs one of its known moves.
+    Move {
+        user_id: u8,
+        move_: &'static Move,
+        move_index: Option<u8>,
+        target_positions: Vec<FieldPosition>
+    },
+    /// An action where the user switches places with a team member not currently on the field.
+    Switch {
+        user_id: u8,
+        switching_in_id: u8
+    }
 }
 
-impl MoveAction {
+impl Action {
     /**
      * @param state - a game state
      * @param otherAction - some other move action
      * @return Whether this move action should come before {@code otherAction} based on priority and the user's speed.
      */
-    pub fn outspeeds(&self, state_box: &State, other_action: &MoveAction, rng: &mut StdRng) -> bool {
-        if self.move_.priority_stage == other_action.move_.priority_stage {
-            let this_spd = pokemon::calculated_stat(state_box, self.user_id, StatIndex::Spd);
-            let other_spd = pokemon::calculated_stat(state_box, other_action.user_id, StatIndex::Spd);
-            if this_spd == other_spd { rng.gen_bool(0.5) } else { this_spd > other_spd }
-        } else {
-            self.move_.priority_stage > other_action.move_.priority_stage
+    pub fn outspeeds(&self, state_box: &State, other_action: &Action, rng: &mut StdRng) -> bool {
+        match other_action {
+            Action::Switch {user_id: _, switching_in_id: _} => {
+                false
+            },
+            Action::Move {user_id: other_user_id, move_: other_move_, move_index: _, target_positions: _} => {
+                match self {
+                    Action::Switch {user_id: _, switching_in_id: _} => {
+                        true
+                    },
+                    Action::Move {user_id, move_, move_index: _, target_positions: _} => {
+                        if move_.priority_stage == other_move_.priority_stage {
+                            let this_spd = pokemon::calculated_stat(state_box, *user_id, StatIndex::Spd);
+                            let other_spd = pokemon::calculated_stat(state_box, *other_user_id, StatIndex::Spd);
+                            if this_spd == other_spd { rng.gen_bool(0.5) } else { this_spd > other_spd }
+                        } else {
+                            move_.priority_stage > other_move_.priority_stage
+                        }
+                    }
+                }
+            }
         }
     }
 
     pub fn can_be_performed(&self, state: &mut State, rng: &mut StdRng) -> bool {
-        let user_msa = state.pokemon[self.user_id as usize].major_status_ailment();
-        if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
-            if cfg!(feature = "print-battle") {
-                let user_display_text = format!("{}", &state.pokemon[self.user_id as usize]);
-                state.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
-            }
-            return false;
-        }
-
-        let user = &state.pokemon[self.user_id as usize];
-        if user.current_hp == 0 || user.field_position == None { return false; }
-        match self.move_index {
-            Some(move_index) => {
-                let move_instance = &user.known_moves[move_index as usize];
-                move_instance.pp > 0 && !move_instance.disabled
-            }
-            None => true
-        }
-    }
-
-    /// Called just before can_be_performed is evaluated.
-    pub fn pre_move_stuff(&self, state: &mut State) {
-        pokemon::increment_msa_counter(state, self.user_id);
-    }
-
-    pub fn perform(&self, state: &mut State, move_action_queue: &[&MoveAction], rng: &mut StdRng) -> bool {
-        if let Some(move_index) = self.move_index {
-            state.pokemon[self.user_id as usize].known_moves[move_index as usize].pp -= 1;
-        }
-
-        if cfg!(feature = "print-battle") {
-            let user_display_text = format!("{}", state.pokemon[self.user_id as usize]);
-            state.display_text.push(format!("{} used {} on:", user_display_text, self.move_.name));
-        }
-
-        for target_pos in &self.target_positions {
-            let target_id = if *target_pos == FieldPosition::Min {
-                state.min_pokemon_id
-            } else {
-                state.max_pokemon_id
-            };
-
-            match target_id {
-                Some(target_id) => {
+        match self {
+            Action::Switch {user_id: _, switching_in_id: _} => {
+                true
+            },
+            Action::Move {user_id, move_: _, move_index, target_positions: _} => {
+                let user_msa = state.pokemon[*user_id as usize].major_status_ailment();
+                if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
                     if cfg!(feature = "print-battle") {
-                        let target_display_text = format!("{}", &state.pokemon[target_id as usize]);
-                        state.display_text.push(format!("- {}", target_display_text));
+                        let user_display_text = format!("{}", &state.pokemon[*user_id as usize]);
+                        state.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
                     }
-
-                    if (self.move_.effect)(state, move_action_queue, self.user_id, target_id, rng) {
-                        return true;
-                    }
+                    return false;
                 }
-                None => {
-                    if cfg!(feature = "print-battle") {
-                        state.display_text.push(String::from("- None"));
-                        state.display_text.push(String::from("But it failed!"));
-                    }
+
+                let user = &state.pokemon[*user_id as usize];
+                if user.current_hp == 0 || user.field_position == None { return false; }
+                match move_index {
+                    Some(move_index) => {
+                        let move_instance = &user.known_moves[*move_index as usize];
+                        move_instance.pp > 0 && !move_instance.disabled
+                    },
+                    None => true
                 }
             }
         }
+    }
 
-        false
+    /// Called just before can_be_performed() is evaluated.
+    pub fn pre_action_stuff(&self, state: &mut State) {
+        if let Action::Move {user_id, move_: _, move_index: _, target_positions: _} = self {
+            pokemon::increment_msa_counter(state, *user_id);
+        }
+    }
+
+    pub fn perform(&self, state: &mut State, action_queue: &[&Action], rng: &mut StdRng) -> bool {
+        match self {
+            Action::Switch {user_id, switching_in_id} => {
+                let user_field_pos = state.pokemon[*user_id as usize].field_position.unwrap();
+                pokemon::remove_from_field(state, *user_id);
+                pokemon::add_to_field(state, *switching_in_id, user_field_pos)
+            },
+            Action::Move {user_id, move_, move_index, target_positions} => {
+                if let Some(move_index) = move_index {
+                    state.pokemon[*user_id as usize].known_moves[*move_index as usize].pp -= 1;
+                }
+
+                if cfg!(feature = "print-battle") {
+                    let user_display_text = format!("{}", state.pokemon[*user_id as usize]);
+                    state.display_text.push(format!("{} used {} on:", user_display_text, move_.name));
+                }
+
+                for target_pos in target_positions {
+                    let target_id = if *target_pos == FieldPosition::Min {
+                        state.min_pokemon_id
+                    } else {
+                        state.max_pokemon_id
+                    };
+
+                    match target_id {
+                        Some(target_id) => {
+                            if cfg!(feature = "print-battle") {
+                                let target_display_text = format!("{}", &state.pokemon[target_id as usize]);
+                                state.display_text.push(format!("- {}", target_display_text));
+                            }
+
+                            if (move_.effect)(state, action_queue, *user_id, target_id, rng) {
+                                return true;
+                            }
+                        }
+                        None => {
+                            if cfg!(feature = "print-battle") {
+                                state.display_text.push(String::from("- None"));
+                                state.display_text.push(String::from("But it failed!"));
+                            }
+                        }
+                    }
+                }
+
+                false
+            }
+        }
     }
 }
-
-/*
-#[derive(Clone, Debug, Hash)]
-pub struct SwitchAction {
-    user_id: u8,
-    switching_in_id: u8
-}
-*/
 
 pub struct Move {
     name: &'static str,
@@ -175,7 +207,7 @@ pub struct Move {
     pub max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&mut State, &[&MoveAction], u8, u8, &mut StdRng) -> bool,
+    effect: fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool,
 }
 
 impl Debug for Move {
@@ -308,7 +340,7 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
     (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
-fn growl(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn growl(state_box: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     if !std_accuracy_check(&state_box.pokemon[user_id as usize], &state_box.pokemon[target_id as usize], 100, rng) {
         if cfg!(feature = "print-battle") {
             let target_name = state_box.pokemon[target_id as usize].species.name;
@@ -321,7 +353,7 @@ fn growl(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target
     false
 }
 
-fn leech_seed(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn leech_seed(state_box: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_is_grass_type;
     {
@@ -365,7 +397,7 @@ fn leech_seed(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, t
     false
 }
 
-fn struggle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn struggle(state_box: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -439,7 +471,7 @@ fn struggle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, tar
     pokemon::apply_damage(state_box, user_id, recoil_damage)
 }
 
-fn tackle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn tackle(state_box: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;
@@ -524,7 +556,7 @@ fn tackle(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, targe
     pokemon::apply_damage(state_box, target_id, modified_damage.round() as i16)
 }
 
-fn vine_whip(state_box: &mut State, _move_queue: &[&MoveAction], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn vine_whip(state_box: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let accuracy_check;
     let target_first_type;
     let target_second_type;
