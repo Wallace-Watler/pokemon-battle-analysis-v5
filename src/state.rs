@@ -4,9 +4,8 @@ use rand::prelude::StdRng;
 use rand::Rng;
 
 use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilment, pokemon, Terrain, Weather};
-use crate::game_theory::{IsMatrix, MathMatrix, Matrix, ZeroSumNashEq};
+use crate::game_theory::{Matrix, ZeroSumNashEq};
 use crate::pokemon::Pokemon;
-use std::f64::NAN;
 use std::borrow::Borrow;
 use crate::move_::Action;
 use crate::move_;
@@ -305,7 +304,7 @@ fn heuristic_value(state_box: &State) -> ZeroSumNashEq {
                 - state_box.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
         }
     } else {
-        let payoff_matrix = MathMatrix::from(
+        let payoff_matrix = Matrix::from(
             state_box.children.iter().map(|child_box| heuristic_value(child_box).expected_payoff).collect(),
             state_box.num_maximizer_actions,
             state_box.num_minimizer_actions);
@@ -313,10 +312,10 @@ fn heuristic_value(state_box: &State) -> ZeroSumNashEq {
     }
 }
 
-/// Simultaneous move alpha-beta search, implemented as per
+/// Simultaneous move alpha-beta search, implemented as a simplification of
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 // TODO: Order moves/children so that pruning is most likely to occur
-fn smab_search(state: &mut State, alpha: f64, beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
+fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
     if recursions < 1 {
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
@@ -333,72 +332,38 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, recursions: u8, rng: &m
         }
     }
 
-    let num_max_actions = state.num_maximizer_actions;
-    let num_min_actions = state.num_minimizer_actions;
+    let m = state.num_maximizer_actions;
+    let n = state.num_minimizer_actions;
 
-    let mut child_values = Matrix::of(None, num_max_actions, num_min_actions);
-    let mut child_values_wo_domination = child_values.clone();
-
-    let mut row_domination = vec![false; num_max_actions];
-    let mut col_domination = vec![false; num_min_actions];
-
-    let mut ab_coords = Vec::with_capacity(num_max_actions * num_min_actions);
-    for i in 0..num_max_actions {
-        for j in 0..num_min_actions {
-            ab_coords.push((i, j));
-        }
-    }
-
-    let mut ij_to_ab_map = Matrix::from(ab_coords, num_max_actions, num_min_actions);
+    let mut payoff_matrix = Matrix::of(0.0, m, n);
+    let mut row_domination = vec![false; m];
+    let mut col_domination = vec![false; n];
+    let mut row_mins = vec![1.0; m];
+    let mut col_maxes = vec![-1.0; n];
 
     let mut explore_child = |i: usize, j: usize| {
         if !row_domination[i] && !col_domination[j] {
-            let (a, b) = ij_to_ab_map.get(i, j);
-            let alpha_child;
-            let beta_child;
-            if *a == child_values_wo_domination.num_rows() - 1 || *b == child_values_wo_domination.num_cols() - 1 {
-                alpha_child = game_theory::alpha_child(*a, *b, &child_values_wo_domination, alpha);
-                beta_child = game_theory::beta_child(*a, *b, &child_values_wo_domination, beta);
+            let child_value = smab_search(&mut state.children[i * n + j], alpha, beta, recursions - 1, rng).expected_payoff;
+            if child_value <= alpha {
+                row_domination[i] = true;
+            } else if child_value >= beta {
+                col_domination[j] = true;
             } else {
-                alpha_child = -1.0;
-                beta_child = 1.0;
-            }
-            let child_index = i * num_min_actions + j;
-
-            if alpha_child >= beta_child {
-                *child_values_wo_domination.get_mut(*a, *b) = Some(NAN);
-            } else {
-                let value = smab_search(&mut state.children[child_index], alpha_child, beta_child, recursions - 1, rng).expected_payoff;
-                if value <= alpha_child {
-                    row_domination[i] = true;
-                    child_values_wo_domination.del_row(*a);
-                    for x in (i + 1)..ij_to_ab_map.num_rows() {
-                        for y in 0..ij_to_ab_map.num_cols() {
-                            ij_to_ab_map.get_mut(x, y).0 -= 1
-                        }
-                    }
-                } else if value >= beta_child {
-                    col_domination[j] = true;
-                    child_values_wo_domination.del_col(*b);
-                    for x in 0..ij_to_ab_map.num_rows() {
-                        for y in (j + 1)..ij_to_ab_map.num_cols() {
-                            ij_to_ab_map.get_mut(x, y).1 -= 1
-                        }
-                    }
-                } else {
-                    *child_values.get_mut(i, j) = Some(value);
-                    *child_values_wo_domination.get_mut(*a, *b) = Some(value);
-                }
+                *payoff_matrix.get_mut(i, j) = child_value;
+                if child_value < row_mins[i] { row_mins[i] = child_value; }
+                if child_value > col_maxes[j] { col_maxes[j] = child_value; }
+                if j == n - 1 && row_mins[i] > alpha { alpha = row_mins[i]; }
+                if i == m - 1 && col_maxes[j] < beta { beta = col_maxes[j]; }
             }
         }
     };
 
     // Explore child matrix in an L-shape
-    for d in 0..min(num_min_actions, num_max_actions) {
-        for j in d..num_min_actions {
+    for d in 0..min(n, m) {
+        for j in d..n {
             explore_child(d, j);
         }
-        for i in (d + 1)..num_max_actions {
+        for i in (d + 1)..m {
             explore_child(i, d);
         }
     }
@@ -407,22 +372,15 @@ fn smab_search(state: &mut State, alpha: f64, beta: f64, recursions: u8, rng: &m
         ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
-            expected_payoff: alpha,
+            expected_payoff: alpha
         }
     } else if col_domination.iter().all(|b| *b) {
         ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
-            expected_payoff: beta,
+            expected_payoff: beta
         }
     } else {
-        let payoff_matrix_entries = child_values.entries().iter().map(|value| {
-            match value {
-                Some(value) => *value,
-                _ => NAN
-            }
-        }).collect::<Vec<f64>>();
-        let payoff_matrix = MathMatrix::from(payoff_matrix_entries, num_max_actions, num_min_actions);
         game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0)
     }
 }
