@@ -172,7 +172,7 @@ impl Matrix {
     #[inline(always)]
     pub fn get_mut(&mut self, i: usize, j: usize) -> &mut f64 {
         let flat_index = self.flat_index(i, j);
-        self.entries.get_mut(flat_index).unwrap() // TODO: Unchecked?
+        self.entries.get_mut(flat_index).unwrap()
     }
 
     fn set_row(&mut self, i: usize, value: f64) {

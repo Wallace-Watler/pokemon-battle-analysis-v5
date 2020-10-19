@@ -16,7 +16,7 @@ pub const AI_LEVEL: u8 = 3;
 #[derive(Debug)]
 pub struct State {
     /// ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team.
-    pub pokemon: [Box<Pokemon>; 12],
+    pub pokemon: [Pokemon; 12],
     /// Pokemon of the minimizing team that is on the field.
     pub min_pokemon_id: Option<u8>,
     /// Pokemon of the maximizing team that is on the field.
@@ -72,41 +72,6 @@ pub fn run_battle(mut state: State, rng: &mut StdRng) -> f64 {
         state.print_display_text();
     }
 
-    build_state_tree(&mut state, AI_LEVEL, rng);
-
-    while !state.children.is_empty() {
-        let nash_eq = heuristic_value(&state);
-        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
-        let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
-
-        let child_index = maximizer_choice * state.num_minimizer_actions + minimizer_choice;
-        let child_box = state.children.remove(child_index);
-        state = child_box;
-        if cfg!(feature = "print-battle") {
-            state.print_display_text();
-        }
-        build_state_tree(&mut state, AI_LEVEL, rng);
-    }
-
-    if cfg!(feature = "print-battle") {
-        println!("<<<< BATTLE END >>>>");
-    }
-    heuristic_value(&state).expected_payoff
-}
-
-/// Run a battle from an initial state; the maximizer and minimizer use game theory to choose their actions. All
-/// state-space branching due to chance events during the course of each turn has been removed to reduce
-/// computational complexity. Instead, one potential outcome is simply chosen at random (weighted appropriately),
-/// so the agents behave as if they know the outcome ahead of time. Over many trials, the heuristic value should
-/// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
-/// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
-/// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle_smab(mut state: State, rng: &mut StdRng) -> f64 {
-    if cfg!(feature = "print-battle") {
-        println!("<<<< BATTLE BEGIN >>>>");
-        state.print_display_text();
-    }
-
     let mut nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
 
     while !state.children.is_empty() {
@@ -126,16 +91,83 @@ pub fn run_battle_smab(mut state: State, rng: &mut StdRng) -> f64 {
     nash_eq.expected_payoff
 }
 
-fn build_state_tree(root: &mut State, recursions: u8, rng: &mut StdRng) {
-    if recursions < 1 { return; }
-
-    if root.children.is_empty() {
-        generate_immediate_children(root, rng);
+/// Simultaneous move alpha-beta search, implemented as a simplification of
+/// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
+fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
+    if recursions < 1 {
+        return ZeroSumNashEq {
+            max_player_strategy: Vec::new(),
+            min_player_strategy: Vec::new(),
+            expected_payoff: (state.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
+                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
+        };
     }
 
-    // If children is still empty, battle has ended
-    for child in &mut root.children {
-        build_state_tree(child, recursions - 1, rng);
+    if state.children.is_empty() {
+        generate_immediate_children(state, rng);
+        if state.children.is_empty() { // If children is still empty, battle has ended.
+            return smab_search(state, alpha, beta, 0, rng);
+        }
+    }
+
+    let m = state.num_maximizer_actions;
+    let n = state.num_minimizer_actions;
+
+    let mut payoff_matrix = Matrix::of(0.0, m, n);
+    let mut row_domination = vec![false; m];
+    let mut col_domination = vec![false; n];
+    let mut row_mins = vec![1.0; m];
+    let mut col_maxes = vec![-1.0; n];
+
+    let mut explore_child = |i: usize, j: usize| {
+        if !row_domination[i] && !col_domination[j] {
+            let child_value = smab_search(&mut state.children[i * n + j], alpha, beta, recursions - 1, rng).expected_payoff;
+            if child_value <= alpha {
+                row_domination[i] = true;
+            } else if child_value >= beta {
+                col_domination[j] = true;
+            } else {
+                *payoff_matrix.get_mut(i, j) = child_value;
+                if child_value < row_mins[i] { row_mins[i] = child_value; }
+                if child_value > col_maxes[j] { col_maxes[j] = child_value; }
+                if j == n - 1 && row_mins[i] > alpha { alpha = row_mins[i]; }
+                if i == m - 1 && col_maxes[j] < beta { beta = col_maxes[j]; }
+            }
+        }
+    };
+
+    // Explore child matrix in an L-shape
+    for d in 0..min(n, m) {
+        for j in d..n {
+            explore_child(d, j);
+        }
+        for i in (d + 1)..m {
+            explore_child(i, d);
+        }
+    }
+
+    if row_domination.iter().all(|b| *b) {
+        ZeroSumNashEq {
+            max_player_strategy: Vec::new(),
+            min_player_strategy: Vec::new(),
+            expected_payoff: alpha
+        }
+    } else if col_domination.iter().all(|b| *b) {
+        ZeroSumNashEq {
+            max_player_strategy: Vec::new(),
+            min_player_strategy: Vec::new(),
+            expected_payoff: beta
+        }
+    } else {
+        // Diminishing returns for future payoffs; 0.0 will ignore future payoffs entirely, while
+        // 1.0 will only account for the farthest-out payoffs. Having the farthest payoffs account
+        // for about half of the value at the root seems to work well, hence the given expression.
+        let gamma = 0.5_f64.powf(1.0 / AI_LEVEL as f64);
+
+        let mut nash_eq = game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0);
+        nash_eq.expected_payoff *= gamma;
+        nash_eq.expected_payoff += (1.0 - gamma) * smab_search(state, alpha, beta, 0, rng).expected_payoff;
+        nash_eq
     }
 }
 
@@ -230,6 +262,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                     });
                 }
 
+                // TODO: It doesn't help much to check switch actions every turn; maybe have a flag to signal when a check should be made?
                 for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
                     let team_member: &Pokemon = state.pokemon[team_member_id].borrow();
                     if team_member.current_hp > 0 && team_member.field_position == None && team_member.known_moves.iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
@@ -263,7 +296,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
     }
 }
 
-// TODO: Make better
+// TODO: Make better; order actions so that pruning is most likely to occur.
 fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Ordering {
     match act1 {
         Action::Switch { .. } => {
@@ -291,97 +324,6 @@ fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Orderi
                 }
             }
         }
-    }
-}
-
-/// Recursively computes the heuristic value of a state.
-fn heuristic_value(state_box: &State) -> ZeroSumNashEq {
-    if state_box.children.is_empty() {
-        ZeroSumNashEq {
-            max_player_strategy: Vec::new(),
-            min_player_strategy: Vec::new(),
-            expected_payoff: (state_box.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
-                - state_box.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
-        }
-    } else {
-        let payoff_matrix = Matrix::from(
-            state_box.children.iter().map(|child_box| heuristic_value(child_box).expected_payoff).collect(),
-            state_box.num_maximizer_actions,
-            state_box.num_minimizer_actions);
-        game_theory::calc_nash_eq(&payoff_matrix, &vec![false; payoff_matrix.num_rows()], &vec![false; payoff_matrix.num_cols()], 2.0)
-    }
-}
-
-/// Simultaneous move alpha-beta search, implemented as a simplification of
-/// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
-// TODO: Order moves/children so that pruning is most likely to occur
-fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
-    if recursions < 1 {
-        return ZeroSumNashEq {
-            max_player_strategy: Vec::new(),
-            min_player_strategy: Vec::new(),
-            expected_payoff: (state.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
-                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
-        };
-    }
-
-    if state.children.is_empty() {
-        generate_immediate_children(state, rng);
-        if state.children.is_empty() { // If children is still empty, battle has ended.
-            return smab_search(state, alpha, beta, 0, rng);
-        }
-    }
-
-    let m = state.num_maximizer_actions;
-    let n = state.num_minimizer_actions;
-
-    let mut payoff_matrix = Matrix::of(0.0, m, n);
-    let mut row_domination = vec![false; m];
-    let mut col_domination = vec![false; n];
-    let mut row_mins = vec![1.0; m];
-    let mut col_maxes = vec![-1.0; n];
-
-    let mut explore_child = |i: usize, j: usize| {
-        if !row_domination[i] && !col_domination[j] {
-            let child_value = smab_search(&mut state.children[i * n + j], alpha, beta, recursions - 1, rng).expected_payoff;
-            if child_value <= alpha {
-                row_domination[i] = true;
-            } else if child_value >= beta {
-                col_domination[j] = true;
-            } else {
-                *payoff_matrix.get_mut(i, j) = child_value;
-                if child_value < row_mins[i] { row_mins[i] = child_value; }
-                if child_value > col_maxes[j] { col_maxes[j] = child_value; }
-                if j == n - 1 && row_mins[i] > alpha { alpha = row_mins[i]; }
-                if i == m - 1 && col_maxes[j] < beta { beta = col_maxes[j]; }
-            }
-        }
-    };
-
-    // Explore child matrix in an L-shape
-    for d in 0..min(n, m) {
-        for j in d..n {
-            explore_child(d, j);
-        }
-        for i in (d + 1)..m {
-            explore_child(i, d);
-        }
-    }
-
-    if row_domination.iter().all(|b| *b) {
-        ZeroSumNashEq {
-            max_player_strategy: Vec::new(),
-            min_player_strategy: Vec::new(),
-            expected_payoff: alpha
-        }
-    } else if col_domination.iter().all(|b| *b) {
-        ZeroSumNashEq {
-            max_player_strategy: Vec::new(),
-            min_player_strategy: Vec::new(),
-            expected_payoff: beta
-        }
-    } else {
-        game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0)
     }
 }
 

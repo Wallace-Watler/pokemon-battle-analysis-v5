@@ -16,18 +16,18 @@ fn ai_benchmark(c: &mut Criterion) {
 
     let bulbasaur_config = PokemonConfig::new(&mut rng);
     let test_pokemon = [
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon())
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon()
     ];
 
     let test_state = || State {
@@ -44,7 +44,7 @@ fn ai_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle_smab(test_state(), &mut rng)));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state(), &mut rng)));
 }
 
 criterion_group!{

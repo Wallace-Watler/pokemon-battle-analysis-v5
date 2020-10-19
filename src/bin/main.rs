@@ -28,18 +28,18 @@ fn main() {
     let bulbasaur_config = PokemonConfig::new(&mut rng);
 
     let test_pokemon = [
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon()),
-        Box::new(bulbasaur_config.create_pokemon())
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon(),
+        bulbasaur_config.create_pokemon()
     ];
 
     let test_state = || State {
@@ -55,5 +55,5 @@ fn main() {
         num_minimizer_actions: 0
     };
 
-    state::run_battle_smab(test_state(), &mut rng);
+    state::run_battle(test_state(), &mut rng);
 }
