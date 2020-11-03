@@ -9,6 +9,7 @@ print-battle = []
 
 [dependencies]
 almost = "0.2.0"
+#lazy_static = "1.4.0"
 rand = "0.7.3"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]

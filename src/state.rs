@@ -16,7 +16,7 @@ pub const AI_LEVEL: u8 = 3;
 #[derive(Debug)]
 pub struct State {
     /// ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team.
-    pub pokemon: [Pokemon; 12],
+    pokemon: [Pokemon; 12],
     /// Pokemon of the minimizing team that is on the field.
     pub min_pokemon_id: Option<u8>,
     /// Pokemon of the maximizing team that is on the field.
@@ -32,6 +32,29 @@ pub struct State {
 }
 
 impl State {
+    pub const fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain) -> State {
+        State {
+            pokemon,
+            min_pokemon_id: None,
+            max_pokemon_id: None,
+            weather,
+            terrain,
+            turn_number: 0,
+            display_text: Vec::new(),
+            children: Vec::new(),
+            num_maximizer_actions: 0,
+            num_minimizer_actions: 0
+        }
+    }
+
+    pub const fn pokemon_by_id(&self, pokemon_id: u8) -> &Pokemon {
+        &self.pokemon[pokemon_id as usize]
+    }
+
+    pub fn pokemon_by_id_mut(&mut self, pokemon_id: u8) -> &mut Pokemon {
+        &mut self.pokemon[pokemon_id as usize]
+    }
+
     fn print_display_text(&self) {
         self.display_text.iter().for_each(|text| {
             text.lines().for_each(|line| println!("  {}", line));
@@ -50,7 +73,7 @@ impl State {
             display_text: Vec::new(),
             children: Vec::new(),
             num_maximizer_actions: 0,
-            num_minimizer_actions: 0,
+            num_minimizer_actions: 0
         }
     }
 

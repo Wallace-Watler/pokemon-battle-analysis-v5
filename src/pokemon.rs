@@ -14,7 +14,7 @@ pub struct Pokemon {
     pub first_type: Type,
     pub second_type: Type,
     gender: Gender,
-    nature: Nature,
+    nature_id: u8,
     pub ability: Ability,
     ivs: [u8; 6],
     evs: [u8; 6],
@@ -50,14 +50,14 @@ pub struct Pokemon {
 }
 
 impl Pokemon {
-    pub fn new(species: &'static Species, gender: Gender, nature: Nature, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static Move]) -> Pokemon {
+    pub fn new(species: &'static Species, gender: Gender, nature_id: u8, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static Move]) -> Pokemon {
         let max_hp = (2 * species.base_stat(StatIndex::Hp) + ivs[StatIndex::Hp.as_usize()] + evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
         Pokemon {
             species,
             first_type: species.first_type,
             second_type: species.second_type,
             gender,
-            nature,
+            nature_id,
             ability,
             ivs,
             evs,
@@ -97,7 +97,7 @@ impl Pokemon {
         }
     }
 
-    pub fn stat_stage(&self, stat_index: StatIndex) -> i8 {
+    pub const fn stat_stage(&self, stat_index: StatIndex) -> i8 {
         self.stat_stages[stat_index.as_usize()]
     }
 
@@ -130,14 +130,14 @@ impl MoveInstance {
 }
 
 pub fn calculated_stat(state: &State, pokemon_id: u8, stat_index: StatIndex) -> u32 {
-    let pokemon = &state.pokemon[pokemon_id as usize];
+    let pokemon = state.pokemon_by_id(pokemon_id);
 
     if stat_index == StatIndex::Hp { return pokemon.max_hp as u32; }
 
     let b = pokemon.species.base_stat(stat_index) as u32;
     let i = pokemon.ivs[stat_index.as_usize()] as u32;
     let e = pokemon.evs[stat_index.as_usize()] as u32;
-    let mut calculated_stat = ((2 * b + i + e / 4 + 5) as f64 * pokemon.nature.stat_mod(stat_index)) as u32;
+    let mut calculated_stat = ((2 * b + i + e / 4 + 5) as f64 * Nature::by_id(pokemon.nature_id).stat_mod(stat_index)) as u32;
 
     if stat_index == StatIndex::Spd {
         if pokemon.major_status_ailment == MajorStatusAilment::Paralyzed {
@@ -150,10 +150,10 @@ pub fn calculated_stat(state: &State, pokemon_id: u8, stat_index: StatIndex) -> 
 }
 
 pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosition) -> bool {
-    state.pokemon[pokemon_id as usize].field_position = Some(field_position);
+    state.pokemon_by_id_mut(pokemon_id).field_position = Some(field_position);
 
     if cfg!(feature = "print-battle") {
-        let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+        let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
         state.display_text.push(format!("Adding {} to field position {:?}.", pokemon_display_text, field_position));
     }
     match field_position {
@@ -161,8 +161,8 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
             match state.min_pokemon_id {
                 None => { state.min_pokemon_id = Some(pokemon_id); }
                 Some(min_pokemon_id) => {
-                    let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon[min_pokemon_id as usize]));
+                    let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(min_pokemon_id)));
                 }
             }
         }
@@ -170,8 +170,8 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
             match state.max_pokemon_id {
                 None => { state.max_pokemon_id = Some(pokemon_id); }
                 Some(max_pokemon_id) => {
-                    let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon[max_pokemon_id as usize]));
+                    let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
+                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(max_pokemon_id)));
                 }
             }
         }
@@ -185,7 +185,7 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
 
     let old_field_pos;
     {
-        let pokemon = &mut state.pokemon[pokemon_id as usize];
+        let pokemon = state.pokemon_by_id_mut(pokemon_id);
         old_field_pos = pokemon.field_position.unwrap();
         pokemon.stat_stages = [0; 8];
         if game_version().gen() == 3 { pokemon.snore_sleep_talk_counter = 0; }
@@ -198,18 +198,18 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
     }
 
     if cfg!(feature = "print-battle") {
-        let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+        let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
         state.display_text.push(format!("Removing {} from field position {:?}.", pokemon_display_text, old_field_pos));
     }
 
     if let Some(min_pokemon_id) = state.min_pokemon_id {
-        let min_pokemon = &mut state.pokemon[min_pokemon_id as usize];
+        let min_pokemon = state.pokemon_by_id_mut(min_pokemon_id);
         if let Some(seeder_id) = min_pokemon.seeded_by {
             if seeder_id == pokemon_id { min_pokemon.seeded_by = None; }
         }
     }
     if let Some(max_pokemon_id) = state.max_pokemon_id {
-        let max_pokemon = &mut state.pokemon[max_pokemon_id as usize];
+        let max_pokemon = state.pokemon_by_id_mut(max_pokemon_id);
         if let Some(seeder_id) = max_pokemon.seeded_by {
             if seeder_id == pokemon_id { max_pokemon.seeded_by = None; }
         }
@@ -220,7 +220,7 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
     } else if state.max_pokemon_id == Some(pokemon_id) {
         state.max_pokemon_id = None;
     } else {
-        let pokemon_display_text = format!("{}", state.pokemon[pokemon_id as usize]);
+        let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
         panic!(format!("ID of {} does not match any ID on the field.", pokemon_display_text));
     }
 }
@@ -229,14 +229,14 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
     let old_stat_stage;
     let new_stat_stage;
     {
-        let pokemon = &mut state.pokemon[pokemon_id as usize];
+        let pokemon = state.pokemon_by_id_mut(pokemon_id);
         old_stat_stage = pokemon.stat_stages[stat_index.as_usize()];
         new_stat_stage = clamp(old_stat_stage + requested_amount, -6, 6);
         pokemon.stat_stages[stat_index.as_usize()] = new_stat_stage;
     }
 
     if cfg!(feature = "print-battle") {
-        let pokemon_species_name = state.pokemon[pokemon_id as usize].species.name;
+        let pokemon_species_name = state.pokemon_by_id(pokemon_id).species.name;
         let actual_change = new_stat_stage - old_stat_stage;
         match actual_change {
             c if c <= -3 => state.display_text.push(format!("{}'s {} severely fell!", pokemon_species_name, stat_index.name())),
@@ -253,7 +253,7 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
 pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
     let mut msa_cured = false;
     {
-        let pokemon = &mut state.pokemon[pokemon_id as usize];
+        let pokemon = state.pokemon_by_id_mut(pokemon_id);
         if let Some(msa_counter_target) = pokemon.msa_counter_target {
             if pokemon.major_status_ailment != MajorStatusAilment::Okay {
                 pokemon.msa_counter += pokemon.snore_sleep_talk_counter as u16 + 1;
@@ -269,7 +269,7 @@ pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
     }
 
     if msa_cured && cfg!(feature = "print-battle") {
-        let pokemon = &state.pokemon[pokemon_id as usize];
+        let pokemon = state.pokemon_by_id(pokemon_id);
         let pokemon_species_name = pokemon.species.name;
         let cured_display_text = pokemon.major_status_ailment.display_text_when_cured();
         state.display_text.push(format!("{}{}", pokemon_species_name, cured_display_text));
@@ -278,24 +278,24 @@ pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
 
 /// The amount can be negative to add HP.
 pub fn apply_damage(state: &mut State, pokemon_id: u8, amount: i16) -> bool {
-    let new_hp = state.pokemon[pokemon_id as usize].current_hp as i16 - amount;
+    let new_hp = state.pokemon_by_id(pokemon_id).current_hp as i16 - amount;
     if new_hp <= 0 {
-        state.pokemon[pokemon_id as usize].current_hp = 0;
+        state.pokemon_by_id_mut(pokemon_id).current_hp = 0;
         if cfg!(feature = "print-battle") {
-            let display_text = format!("{} fainted!", &state.pokemon[pokemon_id as usize]);
+            let display_text = format!("{} fainted!", state.pokemon_by_id(pokemon_id));
             state.display_text.push(display_text);
         }
         remove_from_field(state, pokemon_id);
         return state.battle_end_check();
     }
 
-    let pokemon = &mut state.pokemon[pokemon_id as usize];
+    let pokemon = state.pokemon_by_id_mut(pokemon_id);
     pokemon.current_hp = min(new_hp as u16, pokemon.max_hp);
     false
 }
 
 fn remove_minor_status_ailments(state: &mut State, pokemon_id: u8) {
-    let pokemon = &mut state.pokemon[pokemon_id as usize];
+    let pokemon = state.pokemon_by_id_mut(pokemon_id);
     pokemon.confusion_turn_inflicted = None;
     pokemon.confusion_turn_will_cure = None;
     pokemon.is_flinching = false;

@@ -288,69 +288,61 @@ impl Default for MajorStatusAilment {
     fn default() -> Self { MajorStatusAilment::Okay }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(u8)]
-pub enum Nature {
-    Adamant = 0,
-    Bashful = 1,
-    Bold = 2,
-    Brave = 3,
-    Calm = 4,
-    Careful = 5,
-    Docile = 6,
-    Gentle = 7,
-    Hardy = 8,
-    Hasty = 9,
-    Impish = 10,
-    Jolly = 11,
-    Lax = 12,
-    Lonely = 13,
-    Mild = 14,
-    Modest = 15,
-    Naive = 16,
-    Naughty = 17,
-    Quiet = 18,
-    Quirky = 19,
-    Rash = 20,
-    Relaxed = 21,
-    Sassy = 22,
-    Serious = 23,
-    Timid = 24,
+struct Nature {
+    name: &'static str,
+    stat_mods: [f64; 5]
 }
 
+const NATURES: [Nature; 25] = [
+    Nature { name: "Adamant", stat_mods: [1.1, 1.0, 0.9, 1.0, 1.0] },
+    Nature { name: "Bashful", stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
+    Nature { name: "Bold",    stat_mods: [0.9, 1.1, 1.0, 1.0, 1.0] },
+    Nature { name: "Brave",   stat_mods: [1.1, 1.0, 1.0, 1.0, 0.9] },
+    Nature { name: "Calm",    stat_mods: [0.9, 1.0, 1.0, 1.1, 1.0] },
+    Nature { name: "Careful", stat_mods: [1.0, 1.0, 0.9, 1.1, 1.0] },
+    Nature { name: "Docile",  stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
+    Nature { name: "Gentle",  stat_mods: [1.0, 0.9, 1.0, 1.1, 1.0] },
+    Nature { name: "Hardy",   stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
+    Nature { name: "Hasty",   stat_mods: [1.0, 0.9, 1.0, 1.0, 1.1] },
+    Nature { name: "Impish",  stat_mods: [1.0, 1.1, 0.9, 1.0, 1.0] },
+    Nature { name: "Jolly",   stat_mods: [1.0, 1.0, 0.9, 1.0, 1.1] },
+    Nature { name: "Lax",     stat_mods: [1.0, 1.1, 1.0, 0.9, 1.0] },
+    Nature { name: "Lonely",  stat_mods: [1.1, 0.9, 1.0, 1.0, 1.0] },
+    Nature { name: "Mild",    stat_mods: [1.0, 0.9, 1.1, 1.0, 1.0] },
+    Nature { name: "Modest",  stat_mods: [0.9, 1.0, 1.1, 1.0, 1.0] },
+    Nature { name: "Naive",   stat_mods: [1.0, 1.0, 1.0, 0.9, 1.1] },
+    Nature { name: "Naughty", stat_mods: [1.1, 1.0, 1.0, 0.9, 1.0] },
+    Nature { name: "Quiet",   stat_mods: [1.0, 1.0, 1.1, 1.0, 0.9] },
+    Nature { name: "Quirky",  stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
+    Nature { name: "Rash",    stat_mods: [1.0, 1.0, 1.1, 0.9, 1.0] },
+    Nature { name: "Relaxed", stat_mods: [1.0, 1.1, 1.0, 1.0, 0.9] },
+    Nature { name: "Sassy",   stat_mods: [1.0, 1.0, 1.0, 1.1, 0.9] },
+    Nature { name: "Serious", stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
+    Nature { name: "Timid",   stat_mods: [0.9, 1.0, 1.0, 1.0, 1.1] }
+];
+
 impl Nature {
-    pub fn random_nature(rng: &mut StdRng) -> Nature {
-        unsafe {
-            transmute(rng.gen_range::<u8, u8, u8>(0, 25))
-        }
+    pub fn random_nature(rng: &mut StdRng) -> &'static Nature {
+        &NATURES[rng.gen_range(0, NATURES.len())]
     }
 
-    fn stat_mod(&self, stat_index: StatIndex) -> f64 {
+    const fn by_id(nature_id: u8) -> &'static Nature {
+        &NATURES[nature_id as usize]
+    }
+
+    fn id_by_name(name: &str) -> u8 {
+        for (nature_id, nature) in NATURES.iter().enumerate() {
+            if nature.name.eq_ignore_ascii_case(name) {
+                return nature_id as u8;
+            }
+        }
+        panic!(format!("Invalid nature '{}'.", name));
+    }
+
+    const fn stat_mod(&self, stat_index: StatIndex) -> f64 {
         match stat_index {
             StatIndex::Hp | StatIndex::Acc | StatIndex::Eva => 1.0,
-            _ => match self {
-                Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Bold    => [0.9, 1.1, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Brave   => [1.1, 1.0, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Calm    => [0.9, 1.0, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Gentle  => [1.0, 0.9, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Hasty   => [1.0, 0.9, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
-                Nature::Impish  => [1.0, 1.1, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Jolly   => [1.0, 1.0, 0.9, 1.0, 1.1][stat_index.as_usize() - 1],
-                Nature::Lax     => [1.0, 1.1, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Lonely  => [1.1, 0.9, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Mild    => [1.0, 0.9, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Modest  => [0.9, 1.0, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Naive   => [1.0, 1.0, 1.0, 0.9, 1.1][stat_index.as_usize() - 1],
-                Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Quiet   => [1.0, 1.0, 1.1, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Rash    => [1.0, 1.0, 1.1, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Sassy   => [1.0, 1.0, 1.0, 1.1, 0.9][stat_index.as_usize() - 1],
-                Nature::Timid   => [0.9, 1.0, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
-                _ => 1.0
-            }
+            _ => self.stat_mods[stat_index.as_usize() - 1]
         }
     }
 }
@@ -358,14 +350,14 @@ impl Nature {
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[repr(usize)]
 pub enum StatIndex {
-    Hp = 0,
-    Atk = 1,
-    Def = 2,
-    SpAtk = 3,
-    SpDef = 4,
-    Spd = 5,
-    Acc = 6,
-    Eva = 7,
+    Hp,
+    Atk,
+    Def,
+    SpAtk,
+    SpDef,
+    Spd,
+    Acc,
+    Eva
 }
 
 impl StatIndex {
@@ -382,9 +374,16 @@ impl StatIndex {
         }
     }
 
-    fn as_usize(&self) -> usize {
-        unsafe {
-            transmute(*self)
+    const fn as_usize(&self) -> usize {
+        match self {
+            StatIndex::Hp => 0,
+            StatIndex::Atk => 1,
+            StatIndex::Def => 2,
+            StatIndex::SpAtk => 3,
+            StatIndex::SpDef => 4,
+            StatIndex::Spd => 5,
+            StatIndex::Acc => 6,
+            StatIndex::Eva => 7
         }
     }
 }

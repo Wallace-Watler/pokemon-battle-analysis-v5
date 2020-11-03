@@ -31,7 +31,7 @@ impl Species {
         }
     }
 
-    pub fn base_stat(&self, stat_index: StatIndex) -> u8 {
+    pub const fn base_stat(&self, stat_index: StatIndex) -> u8 {
         self.base_stats[stat_index.as_usize()]
     }
 

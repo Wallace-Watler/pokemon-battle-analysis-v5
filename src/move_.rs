@@ -120,16 +120,16 @@ impl Action {
                 true
             },
             Action::Move {user_id, move_: _, move_index, target_positions: _} => {
-                let user_msa = state.pokemon[*user_id as usize].major_status_ailment();
+                let user_msa = state.pokemon_by_id(*user_id).major_status_ailment();
                 if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
                     if cfg!(feature = "print-battle") {
-                        let user_display_text = format!("{}", &state.pokemon[*user_id as usize]);
+                        let user_display_text = format!("{}", state.pokemon_by_id(*user_id));
                         state.display_text.push(format!("{}{}", user_display_text, user_msa.display_text_when_blocking_move()));
                     }
                     return false;
                 }
 
-                let user = &state.pokemon[*user_id as usize];
+                let user = state.pokemon_by_id(*user_id);
                 if user.current_hp == 0 || user.field_position == None { return false; }
                 match move_index {
                     Some(move_index) => {
@@ -152,17 +152,17 @@ impl Action {
     pub fn perform(&self, state: &mut State, action_queue: &[&Action], rng: &mut StdRng) -> bool {
         match self {
             Action::Switch {user_id, switching_in_id} => {
-                let user_field_pos = state.pokemon[*user_id as usize].field_position.unwrap();
+                let user_field_pos = state.pokemon_by_id(*user_id).field_position.unwrap();
                 pokemon::remove_from_field(state, *user_id);
                 pokemon::add_to_field(state, *switching_in_id, user_field_pos)
             },
             Action::Move {user_id, move_, move_index, target_positions} => {
                 if let Some(move_index) = move_index {
-                    state.pokemon[*user_id as usize].known_moves[*move_index as usize].pp -= 1;
+                    state.pokemon_by_id_mut(*user_id).known_moves[*move_index as usize].pp -= 1;
                 }
 
                 if cfg!(feature = "print-battle") {
-                    let user_display_text = format!("{}", state.pokemon[*user_id as usize]);
+                    let user_display_text = format!("{}", state.pokemon_by_id(*user_id));
                     state.display_text.push(format!("{} used {} on:", user_display_text, move_.name));
                 }
 
@@ -176,7 +176,7 @@ impl Action {
                     match target_id {
                         Some(target_id) => {
                             if cfg!(feature = "print-battle") {
-                                let target_display_text = format!("{}", &state.pokemon[target_id as usize]);
+                                let target_display_text = format!("{}", state.pokemon_by_id(target_id));
                                 state.display_text.push(format!("- {}", target_display_text));
                             }
 
@@ -340,9 +340,9 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
 }
 
 fn growl(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !std_accuracy_check(&state.pokemon[user_id as usize], &state.pokemon[target_id as usize], 100, rng) {
+    if !std_accuracy_check(state.pokemon_by_id(user_id), state.pokemon_by_id(target_id), 100, rng) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -356,37 +356,37 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
     let accuracy_check;
     let target_is_grass_type;
     {
-        let user = &state.pokemon[user_id as usize];
-        let target = &state.pokemon[target_id as usize];
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
         accuracy_check = std_accuracy_check(user, target, 90, rng);
         target_is_grass_type = target.is_type(Type::Grass);
     }
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
     }
 
-    match &state.pokemon[target_id as usize].seeded_by {
+    match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
             if cfg!(feature = "print-battle") {
-                let target_name = state.pokemon[target_id as usize].species.name;
+                let target_name = state.pokemon_by_id(target_id).species.name;
                 state.display_text.push(format!("{} is already seeded!", target_name));
             }
         },
         None => {
             if target_is_grass_type {
                 if cfg!(feature = "print-battle") {
-                    let target_name = state.pokemon[target_id as usize].species.name;
+                    let target_name = state.pokemon_by_id(target_id).species.name;
                     state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
                 }
             } else {
-                state.pokemon[target_id as usize].seeded_by = Some(user_id);
+                state.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
                 if cfg!(feature = "print-battle") {
-                    let target_name = state.pokemon[target_id as usize].species.name;
+                    let target_name = state.pokemon_by_id(target_id).species.name;
                     state.display_text.push(format!("A seed was planted on {}!", target_name));
                 }
             }
@@ -406,8 +406,8 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
     let user_max_hp;
     let user_major_status_ailment;
     {
-        let user = &state.pokemon[user_id as usize];
-        let target = &state.pokemon[target_id as usize];
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
         accuracy_check = game_version().gen() >= 4 || std_accuracy_check(user, target, 100, rng);
         offensive_stat_stage = user.stat_stage(offensive_stat_index);
         defensive_stat_stage = target.stat_stage(defensive_stat_index);
@@ -417,7 +417,7 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -464,7 +464,7 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
         max((user_max_hp as f64 / 4.0).round() as i16, 1)
     };
     if cfg!(feature = "print-battle") {
-        let user_display_text = format!("{}", &state.pokemon[user_id as usize]);
+        let user_display_text = format!("{}", state.pokemon_by_id(user_id));
         state.display_text.push(format!("{} took recoil damage!", user_display_text));
     }
     pokemon::apply_damage(state, user_id, recoil_damage)
@@ -481,8 +481,8 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
     let defensive_stat_stage;
     let user_major_status_ailment;
     {
-        let user = &state.pokemon[user_id as usize];
-        let target = &state.pokemon[target_id as usize];
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
         accuracy_check = std_accuracy_check(user, target, if game_version().gen() <= 4 { 95 } else { 100 }, rng);
         target_first_type = target.first_type;
         target_second_type = target.second_type;
@@ -493,7 +493,7 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -503,7 +503,7 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
         return false;
@@ -539,7 +539,7 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
     };
 
     modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state.pokemon[user_id as usize].is_type(damage_type) {
+    if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
     if cfg!(feature = "print-battle") {
@@ -566,8 +566,8 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
     let defensive_stat_stage;
     let user_major_status_ailment;
     {
-        let user = &state.pokemon[user_id as usize];
-        let target = &state.pokemon[target_id as usize];
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
         accuracy_check = std_accuracy_check(user, target, 100, rng);
         target_first_type = target.first_type;
         target_second_type = target.second_type;
@@ -578,7 +578,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -588,7 +588,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon[target_id as usize].species.name;
+            let target_name = state.pokemon_by_id(target_id).species.name;
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
         return false;
@@ -598,7 +598,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
     let calculated_def = pokemon::calculated_stat(state, target_id, defensive_stat_index);
 
     {
-        let user = &state.pokemon[user_id as usize];
+        let user = state.pokemon_by_id(user_id);
         if user.ability == Ability::Overgrow && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
     }
 
@@ -625,7 +625,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
     };
 
     modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state.pokemon[user_id as usize].is_type(damage_type) {
+    if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
         modified_damage *= 1.5; }
     modified_damage *= type_effectiveness;
     if cfg!(feature = "print-battle") {
