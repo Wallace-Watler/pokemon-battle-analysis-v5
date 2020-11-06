@@ -1,21 +1,21 @@
 use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
 
-use crate::{Ability, FieldPosition, game_version, Gender, MajorStatusAilment, Nature, StatIndex, Type, Weather, clamp};
-use crate::move_::{Move, Action};
-use crate::species::Species;
+use crate::{Ability, FieldPosition, game_version, Gender, MajorStatusAilment, Nature, StatIndex, Type, Weather, clamp, AbilityID};
+use crate::move_::{Move, Action, MoveID};
+use crate::species::{Species, SpeciesID};
 use crate::state::State;
 
 #[derive(Clone, Debug)]
 /// Assumed to be level 100.
 pub struct Pokemon {
-    pub species: &'static Species,
+    pub species: SpeciesID,
     // Types usually match the species' type, but some Pokemon can change types
     pub first_type: Type,
     pub second_type: Type,
     gender: Gender,
-    nature_id: u8,
-    pub ability: Ability,
+    nature: Nature,
+    pub ability: AbilityID,
     ivs: [u8; 6],
     evs: [u8; 6],
     pub max_hp: u16,
@@ -50,14 +50,14 @@ pub struct Pokemon {
 }
 
 impl Pokemon {
-    pub fn new(species: &'static Species, gender: Gender, nature_id: u8, ability: Ability, ivs: [u8; 6], evs: [u8; 6], known_moves: &[&'static Move]) -> Pokemon {
-        let max_hp = (2 * species.base_stat(StatIndex::Hp) + ivs[StatIndex::Hp.as_usize()] + evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
+    pub fn new(species: SpeciesID, gender: Gender, nature: Nature, ability: AbilityID, ivs: [u8; 6], evs: [u8; 6], moves: &[MoveID]) -> Pokemon {
+        let max_hp = (2 * Species::base_stat(species, StatIndex::Hp) + ivs[StatIndex::Hp.as_usize()] + evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
         Pokemon {
             species,
-            first_type: species.first_type,
-            second_type: species.second_type,
+            first_type: Species::type1(species),
+            second_type: Species::type2(species),
             gender,
-            nature_id,
+            nature,
             ability,
             ivs,
             evs,
@@ -76,8 +76,8 @@ impl Pokemon {
             is_cursed: false,
             has_nightmare: false,
             field_position: None,
-            known_moves: known_moves.iter().map(|move_| MoveInstance::new(move_)).collect(),
-            next_move_action: None,
+            known_moves: moves.iter().map(|move_| MoveInstance::new(*move_)).collect(),
+            next_move_action: None
         }
     }
 
@@ -108,22 +108,22 @@ impl Pokemon {
 
 impl Display for Pokemon {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        write!(f, "{}{}({}/{})", self.species.name, self.gender.symbol(), self.current_hp, self.max_hp)
+        write!(f, "{}{}({}/{})", Species::name(self.species), self.gender.symbol(), self.current_hp, self.max_hp)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct MoveInstance {
-    pub move_: &'static Move,
+    pub move_: MoveID,
     pub pp: u8,
     pub disabled: bool,
 }
 
 impl MoveInstance {
-    fn new(move_: &'static Move) -> MoveInstance {
+    fn new(move_: MoveID) -> MoveInstance {
         MoveInstance {
             move_,
-            pp: move_.max_pp,
+            pp: Move::max_pp(move_),
             disabled: false,
         }
     }
@@ -134,16 +134,16 @@ pub fn calculated_stat(state: &State, pokemon_id: u8, stat_index: StatIndex) -> 
 
     if stat_index == StatIndex::Hp { return pokemon.max_hp as u32; }
 
-    let b = pokemon.species.base_stat(stat_index) as u32;
+    let b = Species::base_stat(pokemon.species, stat_index) as u32;
     let i = pokemon.ivs[stat_index.as_usize()] as u32;
     let e = pokemon.evs[stat_index.as_usize()] as u32;
-    let mut calculated_stat = ((2 * b + i + e / 4 + 5) as f64 * Nature::by_id(pokemon.nature_id).stat_mod(stat_index)) as u32;
+    let mut calculated_stat = ((2 * b + i + e / 4 + 5) as f64 * pokemon.nature.stat_mod(stat_index)) as u32;
 
     if stat_index == StatIndex::Spd {
         if pokemon.major_status_ailment == MajorStatusAilment::Paralyzed {
             calculated_stat /= if game_version().gen() <= 6 { 4 } else { 2 };
         }
-        if pokemon.ability == Ability::Chlorophyll && state.weather == Weather::Sunshine { calculated_stat *= 2; }
+        if pokemon.ability == Ability::id_by_name("Chlorophyll").unwrap() && state.weather == Weather::Sunshine { calculated_stat *= 2; }
     }
 
     calculated_stat
@@ -236,16 +236,16 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
     }
 
     if cfg!(feature = "print-battle") {
-        let pokemon_species_name = state.pokemon_by_id(pokemon_id).species.name;
+        let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
         let actual_change = new_stat_stage - old_stat_stage;
         match actual_change {
-            c if c <= -3 => state.display_text.push(format!("{}'s {} severely fell!", pokemon_species_name, stat_index.name())),
-            -2 => state.display_text.push(format!("{}'s {} harshly fell!", pokemon_species_name, stat_index.name())),
-            -1 => state.display_text.push(format!("{}'s {} fell!", pokemon_species_name, stat_index.name())),
-            0 => state.display_text.push(format!("{}'s {} won't go any {}!", pokemon_species_name, stat_index.name(), if requested_amount < 0 { "lower" } else { "higher" })),
-            1 => state.display_text.push(format!("{}'s {} rose!", pokemon_species_name, stat_index.name())),
-            2 => state.display_text.push(format!("{}'s {} rose sharply!", pokemon_species_name, stat_index.name())),
-            _ => state.display_text.push(format!("{}'s {} rose drastically!", pokemon_species_name, stat_index.name()))
+            c if c <= -3 => state.display_text.push(format!("{}'s {} severely fell!", species_name, stat_index.name())),
+            -2 => state.display_text.push(format!("{}'s {} harshly fell!", species_name, stat_index.name())),
+            -1 => state.display_text.push(format!("{}'s {} fell!", species_name, stat_index.name())),
+            0 => state.display_text.push(format!("{}'s {} won't go any {}!", species_name, stat_index.name(), if requested_amount < 0 { "lower" } else { "higher" })),
+            1 => state.display_text.push(format!("{}'s {} rose!", species_name, stat_index.name())),
+            2 => state.display_text.push(format!("{}'s {} rose sharply!", species_name, stat_index.name())),
+            _ => state.display_text.push(format!("{}'s {} rose drastically!", species_name, stat_index.name()))
         }
     }
 }
@@ -270,9 +270,9 @@ pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
 
     if msa_cured && cfg!(feature = "print-battle") {
         let pokemon = state.pokemon_by_id(pokemon_id);
-        let pokemon_species_name = pokemon.species.name;
+        let species_name = Species::name(pokemon.species);
         let cured_display_text = pokemon.major_status_ailment.display_text_when_cured();
-        state.display_text.push(format!("{}{}", pokemon_species_name, cured_display_text));
+        state.display_text.push(format!("{}{}", species_name, cured_display_text));
     }
 }
 

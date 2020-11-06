@@ -10,13 +10,13 @@ use rand::prelude::StdRng;
 pub mod game_theory;
 pub mod move_;
 pub mod pokemon;
-pub mod setup;
+pub mod solution;
 pub mod species;
 pub mod state;
 
 pub static mut GAME_VERSION: GameVersion = GameVersion::SS;
 
-fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
+pub fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
 
 fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
     if min > max { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
@@ -36,10 +36,11 @@ fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
     weights.len() - 1
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub enum FieldPosition {
     Min,
-    Max,
+    Max
 }
 
 impl FieldPosition {
@@ -66,31 +67,57 @@ impl FieldPosition {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Type {
-    None = 0,
-    Normal = 1,
-    Fighting = 2,
-    Flying = 3,
-    Poison = 4,
-    Ground = 5,
-    Rock = 6,
-    Bug = 7,
-    Ghost = 8,
-    Steel = 9,
-    Fire = 10,
-    Water = 11,
-    Grass = 12,
-    Electric = 13,
-    Psychic = 14,
-    Ice = 15,
-    Dragon = 16,
-    Dark = 17,
-    Fairy = 18,
+    None,
+    Normal,
+    Fighting,
+    Flying,
+    Poison,
+    Ground,
+    Rock,
+    Bug,
+    Ghost,
+    Steel,
+    Fire,
+    Water,
+    Grass,
+    Electric,
+    Psychic,
+    Ice,
+    Dragon,
+    Dark,
+    Fairy
 }
 
 impl Type {
+    fn by_name(name: &str) -> Result<Type, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "none"     => Ok(Type::None),
+            "normal"   => Ok(Type::Normal),
+            "fighting" => Ok(Type::Fighting),
+            "flying"   => Ok(Type::Flying),
+            "poison"   => Ok(Type::Poison),
+            "ground"   => Ok(Type::Ground),
+            "rock"     => Ok(Type::Rock),
+            "bug"      => Ok(Type::Bug),
+            "ghost"    => Ok(Type::Ghost),
+            "steel"    => Ok(Type::Steel),
+            "fire"     => Ok(Type::Fire),
+            "water"    => Ok(Type::Water),
+            "grass"    => Ok(Type::Grass),
+            "electric" => Ok(Type::Electric),
+            "psychic"  => Ok(Type::Psychic),
+            "ice"      => Ok(Type::Ice),
+            "dragon"   => Ok(Type::Dragon),
+            "dark"     => Ok(Type::Dark),
+            "fairy"    => Ok(Type::Fairy),
+            _ => Err(format!("Invalid type '{}'", name))
+        }
+    }
+
     const fn category(&self) -> MoveCategory {
         match self {
             Type::None | Type::Normal | Type::Fighting | Type::Flying | Type::Poison | Type::Ground | Type::Rock | Type::Bug | Type::Ghost | Type::Steel => MoveCategory::Physical,
@@ -133,20 +160,22 @@ impl Default for Type {
     fn default() -> Self { Type::None }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub enum Terrain {
     Normal,
     Electric,
     Grassy,
     Misty,
-    Psychic,
+    Psychic
 }
 
 impl Default for Terrain {
     fn default() -> Self { Terrain::Normal }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub enum Weather {
     None,
     Sunshine,
@@ -156,26 +185,37 @@ pub enum Weather {
     Hail,
     Sandstorm,
     StrongWinds,
-    Fog,
+    Fog
 }
 
 impl Default for Weather {
     fn default() -> Self { Weather::None }
 }
 
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Ability {
-    None,
-    Chlorophyll,
-    Overgrow,
+type AbilityID = u8;
+
+struct Ability {
+    name: &'static str
 }
 
-impl Default for Ability {
-    fn default() -> Self { Ability::None }
+impl Ability {
+    fn id_by_name(name: &str) -> Result<AbilityID, String> {
+        for (ability_id, ability) in ABILITIES.iter().enumerate() {
+            if ability.name.eq_ignore_ascii_case(name) {
+                return Ok(ability_id as AbilityID);
+            }
+        }
+        Err(format!("Invalid ability '{}'", name))
+    }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+const ABILITIES: [Ability; 3] = [
+    Ability { name: "None" },
+    Ability { name: "Chlorophyll" },
+    Ability { name: "Overgrow" }
+];
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum GameVersion {
     RS,
     E,
@@ -190,28 +230,26 @@ pub enum GameVersion {
     SM,
     USUM,
     LGPLGE,
-    SS,
-    PIXELMON(u32, u32), // Mod version
+    SS
 }
 
 impl GameVersion {
-    fn _filename(&self) -> String {
+    const fn name(&self) -> &'static str {
         match self {
-            GameVersion::RS => String::from("ruby_sapphire"),
-            GameVersion::E => String::from("emerald"),
-            GameVersion::FRLG => String::from("firered_leafgreen"),
-            GameVersion::DP => String::from("diamond_pearl"),
-            GameVersion::PT => String::from("platinum"),
-            GameVersion::HGSS => String::from("heartgold_soulsilver"),
-            GameVersion::BW => String::from("black_white"),
-            GameVersion::B2W2 => String::from("black2_white2"),
-            GameVersion::XY => String::from("x_y"),
-            GameVersion::ORAS => String::from("omegaruby_alphasapphire"),
-            GameVersion::SM => String::from("sun_moon"),
-            GameVersion::USUM => String::from("ultrasun_ultramoon"),
-            GameVersion::LGPLGE => String::from("letsgopikachu_letsgoeevee"),
-            GameVersion::SS => String::from("sword_shield"),
-            GameVersion::PIXELMON(major, minor) => format!("pixelmon-{}.{}", major, minor)
+            GameVersion::RS => "ruby_sapphire",
+            GameVersion::E => "emerald",
+            GameVersion::FRLG => "firered_leafgreen",
+            GameVersion::DP => "diamond_pearl",
+            GameVersion::PT => "platinum",
+            GameVersion::HGSS => "heartgold_soulsilver",
+            GameVersion::BW => "black_white",
+            GameVersion::B2W2 => "black2_white2",
+            GameVersion::XY => "x_y",
+            GameVersion::ORAS => "omegaruby_alphasapphire",
+            GameVersion::SM => "sun_moon",
+            GameVersion::USUM => "ultrasun_ultramoon",
+            GameVersion::LGPLGE => "letsgopikachu_letsgoeevee",
+            GameVersion::SS => "sword_shield"
         }
     }
 
@@ -222,8 +260,7 @@ impl GameVersion {
             GameVersion::BW | GameVersion::B2W2 => 5,
             GameVersion::XY | GameVersion::ORAS => 6,
             GameVersion::SM | GameVersion::USUM | GameVersion::LGPLGE => 7,
-            GameVersion::SS => 8,
-            GameVersion::PIXELMON(_major, _minor) => 8 // TODO: Put proper gens here
+            GameVersion::SS => 8
         }
     }
 }
@@ -232,16 +269,34 @@ impl Default for GameVersion {
     fn default() -> Self { GameVersion::SS }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Gender {
     None,
     Male,
-    Female,
+    Female
 }
 
 impl Gender {
-    const fn symbol(&self) -> &str {
+    fn by_name(name: &str) -> Result<Gender, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "none" => Ok(Gender::None),
+            "male" => Ok(Gender::Male),
+            "female" => Ok(Gender::Female),
+            _ => Err(format!("Invalid gender '{}'", name))
+        }
+    }
+
+    const fn _name(&self) -> &'static str {
+        match self {
+            Gender::None => "None",
+            Gender::Male => "Male",
+            Gender::Female => "Female"
+        }
+    }
+
+    const fn symbol(&self) -> &'static str {
         match self {
             Gender::None => "",
             Gender::Male => "♂",
@@ -250,8 +305,8 @@ impl Gender {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MajorStatusAilment {
     Okay,
     Asleep,
@@ -259,7 +314,7 @@ pub enum MajorStatusAilment {
     BadlyPoisoned,
     Paralyzed,
     Burned,
-    Frozen,
+    Frozen
 }
 
 impl MajorStatusAilment {
@@ -288,61 +343,101 @@ impl Default for MajorStatusAilment {
     fn default() -> Self { MajorStatusAilment::Okay }
 }
 
-struct Nature {
-    name: &'static str,
-    stat_mods: [f64; 5]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Nature {
+    Adamant,
+    Bashful,
+    Bold,
+    Brave,
+    Calm,
+    Careful,
+    Docile,
+    Gentle,
+    Hardy,
+    Hasty,
+    Impish,
+    Jolly,
+    Lax,
+    Lonely,
+    Mild,
+    Modest,
+    Naive,
+    Naughty,
+    Quiet,
+    Quirky,
+    Rash,
+    Relaxed,
+    Sassy,
+    Serious,
+    Timid
 }
 
-const NATURES: [Nature; 25] = [
-    Nature { name: "Adamant", stat_mods: [1.1, 1.0, 0.9, 1.0, 1.0] },
-    Nature { name: "Bashful", stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
-    Nature { name: "Bold",    stat_mods: [0.9, 1.1, 1.0, 1.0, 1.0] },
-    Nature { name: "Brave",   stat_mods: [1.1, 1.0, 1.0, 1.0, 0.9] },
-    Nature { name: "Calm",    stat_mods: [0.9, 1.0, 1.0, 1.1, 1.0] },
-    Nature { name: "Careful", stat_mods: [1.0, 1.0, 0.9, 1.1, 1.0] },
-    Nature { name: "Docile",  stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
-    Nature { name: "Gentle",  stat_mods: [1.0, 0.9, 1.0, 1.1, 1.0] },
-    Nature { name: "Hardy",   stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
-    Nature { name: "Hasty",   stat_mods: [1.0, 0.9, 1.0, 1.0, 1.1] },
-    Nature { name: "Impish",  stat_mods: [1.0, 1.1, 0.9, 1.0, 1.0] },
-    Nature { name: "Jolly",   stat_mods: [1.0, 1.0, 0.9, 1.0, 1.1] },
-    Nature { name: "Lax",     stat_mods: [1.0, 1.1, 1.0, 0.9, 1.0] },
-    Nature { name: "Lonely",  stat_mods: [1.1, 0.9, 1.0, 1.0, 1.0] },
-    Nature { name: "Mild",    stat_mods: [1.0, 0.9, 1.1, 1.0, 1.0] },
-    Nature { name: "Modest",  stat_mods: [0.9, 1.0, 1.1, 1.0, 1.0] },
-    Nature { name: "Naive",   stat_mods: [1.0, 1.0, 1.0, 0.9, 1.1] },
-    Nature { name: "Naughty", stat_mods: [1.1, 1.0, 1.0, 0.9, 1.0] },
-    Nature { name: "Quiet",   stat_mods: [1.0, 1.0, 1.1, 1.0, 0.9] },
-    Nature { name: "Quirky",  stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
-    Nature { name: "Rash",    stat_mods: [1.0, 1.0, 1.1, 0.9, 1.0] },
-    Nature { name: "Relaxed", stat_mods: [1.0, 1.1, 1.0, 1.0, 0.9] },
-    Nature { name: "Sassy",   stat_mods: [1.0, 1.0, 1.0, 1.1, 0.9] },
-    Nature { name: "Serious", stat_mods: [1.0, 1.0, 1.0, 1.0, 1.0] },
-    Nature { name: "Timid",   stat_mods: [0.9, 1.0, 1.0, 1.0, 1.1] }
-];
-
 impl Nature {
-    pub fn random_nature(rng: &mut StdRng) -> &'static Nature {
-        &NATURES[rng.gen_range(0, NATURES.len())]
-    }
-
-    const fn by_id(nature_id: u8) -> &'static Nature {
-        &NATURES[nature_id as usize]
-    }
-
-    fn id_by_name(name: &str) -> u8 {
-        for (nature_id, nature) in NATURES.iter().enumerate() {
-            if nature.name.eq_ignore_ascii_case(name) {
-                return nature_id as u8;
-            }
+    pub fn random_nature(rng: &mut StdRng) -> Nature {
+        unsafe {
+            transmute::<u8, Nature>(rng.gen_range(0, 25))
         }
-        panic!(format!("Invalid nature '{}'.", name));
+    }
+
+    fn by_name(name: &str) -> Result<Nature, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "adamant" => Ok(Nature::Adamant),
+            "bashful" => Ok(Nature::Bashful),
+            "bold"    => Ok(Nature::Bold),
+            "brave"   => Ok(Nature::Brave),
+            "calm"    => Ok(Nature::Calm),
+            "careful" => Ok(Nature::Careful),
+            "docile"  => Ok(Nature::Docile),
+            "gentle"  => Ok(Nature::Gentle),
+            "hardy"   => Ok(Nature::Hardy),
+            "hasty"   => Ok(Nature::Hasty),
+            "impish"  => Ok(Nature::Impish),
+            "jolly"   => Ok(Nature::Jolly),
+            "lax"     => Ok(Nature::Lax),
+            "lonely"  => Ok(Nature::Lonely),
+            "mild"    => Ok(Nature::Mild),
+            "modest"  => Ok(Nature::Modest),
+            "naive"   => Ok(Nature::Naive),
+            "naughty" => Ok(Nature::Naughty),
+            "quiet"   => Ok(Nature::Quiet),
+            "quirky"  => Ok(Nature::Quirky),
+            "rash"    => Ok(Nature::Rash),
+            "relaxed" => Ok(Nature::Relaxed),
+            "sassy"   => Ok(Nature::Sassy),
+            "serious" => Ok(Nature::Serious),
+            "timid"   => Ok(Nature::Timid),
+            _ => Err(format!("Invalid nature '{}'", name))
+        }
     }
 
     const fn stat_mod(&self, stat_index: StatIndex) -> f64 {
         match stat_index {
             StatIndex::Hp | StatIndex::Acc | StatIndex::Eva => 1.0,
-            _ => self.stat_mods[stat_index.as_usize() - 1]
+            _ => match self {
+                Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Bold    => [0.9, 1.1, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Brave   => [1.1, 1.0, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Calm    => [0.9, 1.0, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Gentle  => [1.0, 0.9, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
+                Nature::Hasty   => [1.0, 0.9, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
+                Nature::Impish  => [1.0, 1.1, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Jolly   => [1.0, 1.0, 0.9, 1.0, 1.1][stat_index.as_usize() - 1],
+                Nature::Lax     => [1.0, 1.1, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Lonely  => [1.1, 0.9, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Mild    => [1.0, 0.9, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Modest  => [0.9, 1.0, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
+                Nature::Naive   => [1.0, 1.0, 1.0, 0.9, 1.1][stat_index.as_usize() - 1],
+                Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Quiet   => [1.0, 1.0, 1.1, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Rash    => [1.0, 1.0, 1.1, 0.9, 1.0][stat_index.as_usize() - 1],
+                Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
+                Nature::Sassy   => [1.0, 1.0, 1.0, 1.1, 0.9][stat_index.as_usize() - 1],
+                Nature::Timid   => [0.9, 1.0, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
+                _ => 1.0
+            }
         }
     }
 }
@@ -361,7 +456,7 @@ pub enum StatIndex {
 }
 
 impl StatIndex {
-    const fn name(&self) -> &str {
+    const fn name(&self) -> &'static str {
         match self {
             StatIndex::Hp => "HP",
             StatIndex::Atk => "attack",

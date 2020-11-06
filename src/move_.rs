@@ -7,12 +7,13 @@ use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, S
 use crate::pokemon::Pokemon;
 use crate::state::State;
 use rand::prelude::StdRng;
+use crate::species::Species;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum MoveCategory {
     Physical,
     Special,
-    Status,
+    Status
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -29,7 +30,7 @@ pub enum MoveTargeting {
     AllAdjacentPokemon,
     AllAllies,
     AllOpponents,
-    AllPokemon,
+    AllPokemon
 }
 
 impl MoveTargeting {
@@ -73,7 +74,7 @@ pub enum Action {
     /// An action where the user performs one of its known moves.
     Move {
         user_id: u8,
-        move_: &'static Move,
+        move_: MoveID,
         move_index: Option<u8>,
         target_positions: Vec<FieldPosition>
     },
@@ -95,12 +96,14 @@ impl Action {
             Action::Switch {user_id: _, switching_in_id: _} => {
                 false
             },
-            Action::Move {user_id: other_user_id, move_: other_move_, move_index: _, target_positions: _} => {
+            Action::Move {user_id: other_user_id, move_: other_move, move_index: _, target_positions: _} => {
                 match self {
                     Action::Switch {user_id: _, switching_in_id: _} => {
                         true
                     },
                     Action::Move {user_id, move_, move_index: _, target_positions: _} => {
+                        let move_ = Move::by_id(*move_);
+                        let other_move_ = Move::by_id(*other_move);
                         if move_.priority_stage == other_move_.priority_stage {
                             let this_spd = pokemon::calculated_stat(state_box, *user_id, StatIndex::Spd);
                             let other_spd = pokemon::calculated_stat(state_box, *other_user_id, StatIndex::Spd);
@@ -156,7 +159,9 @@ impl Action {
                 pokemon::remove_from_field(state, *user_id);
                 pokemon::add_to_field(state, *switching_in_id, user_field_pos)
             },
-            Action::Move {user_id, move_, move_index, target_positions} => {
+            Action::Move {user_id, move_: move_id, move_index, target_positions} => {
+                let move_ = Move::by_id(*move_id);
+
                 if let Some(move_index) = move_index {
                     state.pokemon_by_id_mut(*user_id).known_moves[*move_index as usize].pp -= 1;
                 }
@@ -199,15 +204,44 @@ impl Action {
     }
 }
 
+pub type MoveID = u8;
+
 pub struct Move {
     name: &'static str,
     type_: Type,
     category: MoveCategory,
-    pub targeting: MoveTargeting,
-    pub max_pp: u8,
+    targeting: MoveTargeting,
+    max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool,
+    effect: fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool
+}
+
+impl Move {
+    pub fn id_by_name(name: &str) -> Result<MoveID, String> {
+        unsafe {
+            for (move_id, moves) in MOVES.iter().enumerate() {
+                if moves.name.eq_ignore_ascii_case(name) {
+                    return Ok(move_id as MoveID);
+                }
+            }
+        }
+        Err(format!("Invalid move '{}'", name))
+    }
+
+    fn by_id(move_id: MoveID) -> &'static Move {
+        unsafe {
+            &MOVES[move_id as usize]
+        }
+    }
+
+    pub fn targeting(move_: MoveID) -> MoveTargeting {
+        Move::by_id(move_).targeting
+    }
+
+    pub fn max_pp(move_: MoveID) -> u8 {
+        Move::by_id(move_).max_pp
+    }
 }
 
 impl Debug for Move {
@@ -224,86 +258,67 @@ impl Debug for Move {
     }
 }
 
-impl PartialEq for Move {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for Move {}
-
-pub static mut GROWL: Move = Move {
-    name: "Growl",
-    type_: Type::Normal,
-    category: MoveCategory::Status,
-    targeting: MoveTargeting::AllAdjacentOpponents,
-    max_pp: 40,
-    priority_stage: 0,
-    sound_based: true,
-    effect: growl,
-};
-
-pub static mut LEECH_SEED: Move = Move {
-    name: "Leech Seed",
-    type_: Type::Grass,
-    category: MoveCategory::Status,
-    targeting: MoveTargeting::SingleAdjacentOpponent,
-    max_pp: 10,
-    priority_stage: 0,
-    sound_based: false,
-    effect: leech_seed,
-};
-
-pub static mut STRUGGLE: Move = Move {
-    name: "Struggle",
-    type_: Type::None,
-    category: MoveCategory::Physical,
-    targeting: MoveTargeting::RandomOpponent,
-    max_pp: 1,
-    priority_stage: 0,
-    sound_based: false,
-    effect: struggle,
-};
-
-pub static mut TACKLE: Move = Move {
-    name: "Tackle",
-    type_: Type::Normal,
-    category: MoveCategory::Physical,
-    targeting: MoveTargeting::SingleAdjacentOpponent,
-    max_pp: 35,
-    priority_stage: 0,
-    sound_based: false,
-    effect: tackle,
-};
-
-pub static mut VINE_WHIP: Move = Move {
-    name: "Vine Whip",
-    type_: Type::Grass,
-    category: MoveCategory::Physical,
-    targeting: MoveTargeting::SingleAdjacentOpponent,
-    max_pp: 10,
-    priority_stage: 0,
-    sound_based: false,
-    effect: vine_whip,
-};
+static mut MOVES: Vec<Move> = vec![];
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and before the species are initialized.
 pub unsafe fn initialize_moves() {
-    VINE_WHIP = Move {
-        name: "Vine Whip",
-        type_: Type::Grass,
-        category: MoveCategory::Physical,
-        targeting: MoveTargeting::SingleAdjacentOpponent,
-        max_pp: match game_version().gen() {
-            1..=3 => 10,
-            4..=5 => 15,
-            _ => 25
+    MOVES = vec![
+        Move {
+            name: "Growl",
+            type_: Type::Normal,
+            category: MoveCategory::Status,
+            targeting: MoveTargeting::AllAdjacentOpponents,
+            max_pp: 40,
+            priority_stage: 0,
+            sound_based: true,
+            effect: growl
         },
-        priority_stage: 0,
-        sound_based: false,
-        effect: vine_whip,
-    };
+        Move {
+            name: "Leech Seed",
+            type_: Type::Grass,
+            category: MoveCategory::Status,
+            targeting: MoveTargeting::SingleAdjacentOpponent,
+            max_pp: 10,
+            priority_stage: 0,
+            sound_based: false,
+            effect: leech_seed
+        },
+        Move {
+            name: "Struggle",
+            type_: Type::None,
+            category: MoveCategory::Physical,
+            targeting: MoveTargeting::RandomOpponent,
+            max_pp: 1,
+            priority_stage: 0,
+            sound_based: false,
+            effect: struggle
+        },
+        Move {
+            name: "Tackle",
+            type_: Type::Normal,
+            category: MoveCategory::Physical,
+            targeting: MoveTargeting::SingleAdjacentOpponent,
+            max_pp: 35,
+            priority_stage: 0,
+            sound_based: false,
+            effect: tackle
+        },
+        Move {
+            name: "Vine Whip",
+            type_: Type::Grass,
+            category: MoveCategory::Physical,
+            targeting: MoveTargeting::SingleAdjacentOpponent,
+            max_pp: match game_version().gen() {
+                1..=3 => 10,
+                4..=5 => 15,
+                _ => 25
+            },
+            priority_stage: 0,
+            sound_based: false,
+            effect: vine_whip
+        }
+    ];
 }
 
 // ---- MOVE FUNCTIONS ---- //
@@ -342,7 +357,7 @@ fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, of
 fn growl(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     if !std_accuracy_check(state.pokemon_by_id(user_id), state.pokemon_by_id(target_id), 100, rng) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -364,7 +379,7 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -373,20 +388,20 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
     match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
             if cfg!(feature = "print-battle") {
-                let target_name = state.pokemon_by_id(target_id).species.name;
+                let target_name = Species::name(state.pokemon_by_id(target_id).species);
                 state.display_text.push(format!("{} is already seeded!", target_name));
             }
         },
         None => {
             if target_is_grass_type {
                 if cfg!(feature = "print-battle") {
-                    let target_name = state.pokemon_by_id(target_id).species.name;
+                    let target_name = Species::name(state.pokemon_by_id(target_id).species);
                     state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
                 }
             } else {
                 state.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
                 if cfg!(feature = "print-battle") {
-                    let target_name = state.pokemon_by_id(target_id).species.name;
+                    let target_name = Species::name(state.pokemon_by_id(target_id).species);
                     state.display_text.push(format!("A seed was planted on {}!", target_name));
                 }
             }
@@ -417,7 +432,7 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -493,7 +508,7 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -503,7 +518,7 @@ fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: 
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
         return false;
@@ -578,7 +593,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
 
     if !accuracy_check {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("{} avoided the attack!", target_name));
         }
         return false;
@@ -588,7 +603,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
         if cfg!(feature = "print-battle") {
-            let target_name = state.pokemon_by_id(target_id).species.name;
+            let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
         return false;
@@ -599,7 +614,7 @@ fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_i
 
     {
         let user = state.pokemon_by_id(user_id);
-        if user.ability == Ability::Overgrow && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
+        if user.ability == Ability::id_by_name("Overgrow").unwrap() && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
     }
 
     /*

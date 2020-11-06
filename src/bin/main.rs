@@ -3,7 +3,7 @@ use jemallocator::Jemalloc;
 
 use pokemon_battle_analysis_v5::{GameVersion, state};
 use pokemon_battle_analysis_v5::move_;
-use pokemon_battle_analysis_v5::setup::PokemonBuild;
+use pokemon_battle_analysis_v5::solution::PokemonBuild;
 use pokemon_battle_analysis_v5::species;
 use pokemon_battle_analysis_v5::state::State;
 use rand::SeedableRng;
@@ -26,7 +26,6 @@ fn main() {
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
     let bulbasaur_build = PokemonBuild::new(&mut rng);
-
     let test_pokemon = [
         bulbasaur_build.create_pokemon(),
         bulbasaur_build.create_pokemon(),

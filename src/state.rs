@@ -7,8 +7,7 @@ use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilmen
 use crate::game_theory::{Matrix, ZeroSumNashEq};
 use crate::pokemon::Pokemon;
 use std::borrow::Borrow;
-use crate::move_::Action;
-use crate::move_;
+use crate::move_::{Action, Move};
 
 pub const AI_LEVEL: u8 = 3;
 
@@ -268,20 +267,20 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                             move_,
                             move_index: Some(move_index as u8),
                             target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                                .filter(|field_pos| move_.targeting.can_hit(user.field_position.unwrap(), *field_pos)).collect(),
+                                .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position.unwrap(), *field_pos)).collect(),
                         });
                     }
                 }
 
                 // TODO: Can Struggle be used if switch actions are available?
                 if actions.is_empty() {
-                    let move_ = unsafe { &crate::move_::STRUGGLE };
+                    let struggle = Move::id_by_name("Struggle").unwrap();
                     actions.push(Action::Move {
                         user_id,
-                        move_,
+                        move_: struggle,
                         move_index: None,
                         target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                            .filter(|field_pos| move_.targeting.can_hit(user.field_position.unwrap(), *field_pos)).collect(),
+                            .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position.unwrap(), *field_pos)).collect(),
                     });
                 }
 
@@ -328,22 +327,20 @@ fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Orderi
                 Action::Move { .. } => Ordering::Greater
             }
         },
-        Action::Move {user_id: _, move_: act1_move_, move_index: _, target_positions: _} => {
+        Action::Move {user_id: _, move_: act1_move_id, move_index: _, target_positions: _} => {
             match act2 {
                 Action::Switch { .. } => Ordering::Less,
-                Action::Move {user_id: _, move_: act2_move_, move_index: _, target_positions: _} => {
-                    unsafe {
-                        if *act1_move_ == &move_::TACKLE && *act2_move_ == &move_::TACKLE { return Ordering::Equal; }
-                        if *act1_move_ == &move_::TACKLE && *act2_move_ != &move_::TACKLE { return Ordering::Less; }
-                        if *act1_move_ != &move_::TACKLE && *act2_move_ == &move_::TACKLE { return Ordering::Greater; }
-                        if *act1_move_ == &move_::GROWL && *act2_move_ == &move_::GROWL { return Ordering::Equal; }
-                        if *act1_move_ == &move_::GROWL && *act2_move_ != &move_::GROWL { return Ordering::Less; }
-                        if *act1_move_ != &move_::GROWL && *act2_move_ == &move_::GROWL { return Ordering::Greater; }
-                        if *act1_move_ == &move_::VINE_WHIP && *act2_move_ == &move_::VINE_WHIP { return Ordering::Equal; }
-                        if *act1_move_ == &move_::VINE_WHIP && *act2_move_ != &move_::VINE_WHIP { return Ordering::Less; }
-                        if *act1_move_ != &move_::VINE_WHIP && *act2_move_ == &move_::VINE_WHIP { return Ordering::Greater; }
-                        Ordering::Equal
-                    }
+                Action::Move {user_id: _, move_: act2_move_id, move_index: _, target_positions: _} => {
+                    if *act1_move_id == Move::id_by_name("Tackle").unwrap() && *act2_move_id == Move::id_by_name("Tackle").unwrap() { return Ordering::Equal; }
+                    if *act1_move_id == Move::id_by_name("Tackle").unwrap() && *act2_move_id != Move::id_by_name("Tackle").unwrap() { return Ordering::Less; }
+                    if *act1_move_id != Move::id_by_name("Tackle").unwrap() && *act2_move_id == Move::id_by_name("Tackle").unwrap() { return Ordering::Greater; }
+                    if *act1_move_id == Move::id_by_name("Growl").unwrap() && *act2_move_id == Move::id_by_name("Growl").unwrap() { return Ordering::Equal; }
+                    if *act1_move_id == Move::id_by_name("Growl").unwrap() && *act2_move_id != Move::id_by_name("Growl").unwrap() { return Ordering::Less; }
+                    if *act1_move_id != Move::id_by_name("Growl").unwrap() && *act2_move_id == Move::id_by_name("Growl").unwrap() { return Ordering::Greater; }
+                    if *act1_move_id == Move::id_by_name("Vine Whip").unwrap() && *act2_move_id == Move::id_by_name("Vine Whip").unwrap() { return Ordering::Equal; }
+                    if *act1_move_id == Move::id_by_name("Vine Whip").unwrap() && *act2_move_id != Move::id_by_name("Vine Whip").unwrap() { return Ordering::Less; }
+                    if *act1_move_id != Move::id_by_name("Vine Whip").unwrap() && *act2_move_id == Move::id_by_name("Vine Whip").unwrap() { return Ordering::Greater; }
+                    Ordering::Equal
                 }
             }
         }

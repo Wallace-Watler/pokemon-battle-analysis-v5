@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
 use pokemon_battle_analysis_v5::state::State;
-use pokemon_battle_analysis_v5::setup::PokemonBuild;
+use pokemon_battle_analysis_v5::solution::PokemonBuild;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
 

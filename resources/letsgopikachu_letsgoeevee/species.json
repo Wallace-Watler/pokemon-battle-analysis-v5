@@ -1,0 +1,41 @@
+[
+    {
+        "name": "Bulbasaur",
+        "type1": "Grass",
+        "type2": "Poison",
+        "ability1": "Overgrow",
+        "ability2": "None",
+        "base_stats": [45, 49, 49, 65, 65, 45],
+        "weight": 69,
+        "male_chance": 875,
+        "female_chance": 125,
+        "allow_duplicates": true,
+        "move_pool": [
+            "Growl",
+            "Leech Seed",
+            "Tackle",
+            "Vine Whip"
+        ],
+        "_comments": [
+            "TODO: Add the following moves",
+            "Poison Powder",
+            "Sleep Powder",
+            "Take Down",
+            "Razor Leaf",
+            "Growth",
+            "Double-Edge",
+            "Headbutt",
+            "Rest",
+            "Light Screen",
+            "Protect",
+            "Substitute",
+            "Reflect",
+            "Facade",
+            "Toxic",
+            "Outrage",
+            "Solar Beam",
+            "Sludge Bomb",
+            "Mega Drain"
+        ]
+    }
+]
