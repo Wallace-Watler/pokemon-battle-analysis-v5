@@ -1,0 +1,47 @@
+[
+    {
+        "name": "Growl",
+        "type": "Normal",
+        "category": "Status",
+        "targeting": "AllAdjacentOpponents",
+        "max_pp": 40,
+        "priority_stage": 0,
+        "sound_based": true
+    },
+    {
+        "name": "Leech Seed",
+        "type": "Grass",
+        "category": "Status",
+        "targeting": "SingleAdjacentOpponent",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false
+    },
+    {
+        "name": "Struggle",
+        "type": "None",
+        "category": "Physical",
+        "targeting": "RandomOpponent",
+        "max_pp": 1,
+        "priority_stage": 0,
+        "sound_based": false
+    },
+    {
+        "name": "Tackle",
+        "type": "Normal",
+        "category": "Physical",
+        "targeting": "SingleAdjacentOpponent",
+        "max_pp": 35,
+        "priority_stage": 0,
+        "sound_based": false
+    },
+    {
+        "name": "Vine Whip",
+        "type": "Grass",
+        "category": "Physical",
+        "targeting": "SingleAdjacentOpponent",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false
+    }
+]

@@ -112,7 +112,7 @@ pub fn initialize_species() {
     let mut path = String::from("resources/");
     path.push_str(game_version().name());
     path.push_str("/species.json");
-    let species_json = fs::read_to_string(path.as_str()).expect(format!("Failed to read {}.", path).as_str());
+    let species_json = fs::read_to_string(path.as_str()).unwrap_or_else(|_| panic!("Failed to read {}.", path));
 
     match json::parse(species_json.as_str()) {
         json::Result::Ok(parsed) => {
@@ -124,25 +124,31 @@ pub fn initialize_species() {
                             JsonValue::Object(object) => {
                                 let extract_string = |key: &str| -> &str {
                                     object.get(key)
-                                        .expect(format!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key).as_str())
+                                        .unwrap_or_else(|| panic!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
                                         .as_str()
-                                        .expect(format!("Invalid species JSON: '{}' in object\n{}\nis not a String", key, member_pretty).as_str())
+                                        .unwrap_or_else(|| panic!("Invalid species JSON: '{}' in object\n{}\nis not a String", key, member_pretty))
                                 };
                                 let extract_type = |key: &str| -> Type {
                                     let string = extract_string(key);
                                     Type::by_name(string)
-                                        .expect(format!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key).as_str())
+                                        .unwrap_or_else(|_| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
                                 };
                                 let extract_ability = |key: &str| -> AbilityID {
                                     let string = extract_string(key);
                                     Ability::id_by_name(string)
-                                        .expect(format!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key).as_str())
+                                        .unwrap_or_else(|_| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
                                 };
                                 let extract_u16 = |key: &str| -> u16 {
                                     object.get(key)
-                                        .expect(format!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key).as_str())
+                                        .unwrap_or_else(|| panic!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
                                         .as_u16()
-                                        .expect(format!("Invalid species JSON: '{}' in object\n{}\nis not a valid u16 number", key, member_pretty).as_str())
+                                        .unwrap_or_else(|| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid u16 number", key, member_pretty))
+                                };
+                                let extract_bool = |key: &str| -> bool {
+                                    object.get(key)
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
+                                        .as_bool()
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid boolean", key, member_pretty))
                                 };
 
                                 let mut base_stats: [u8; 6] = [0, 0, 0, 0, 0, 0];
@@ -153,13 +159,13 @@ pub fn initialize_species() {
                                                 if array.len() != 6 { panic!(format!("Invalid species JSON: 'base_stats' in object\n{}\ndoes not contain 6 numbers", member_pretty)) }
                                                 for (i, member) in array.iter().enumerate() {
                                                     base_stats[i] = member.as_u8()
-                                                        .expect(format!("Invalid species JSON: 'base_stats' in object\n{}\ncontains invalid u8 numbers", member_pretty).as_str())
+                                                        .unwrap_or_else(|| panic!("Invalid species JSON: 'base_stats' in object\n{}\ncontains invalid u8 numbers", member_pretty))
                                                 }
                                             },
-                                            _ => panic!(format!("Invalid species JSON: 'base_stats' in object\n{}\nis not an array", member_pretty))
+                                            _ => panic!("Invalid species JSON: 'base_stats' in object\n{}\nis not an array", member_pretty)
                                         }
                                     },
-                                    None => panic!(format!("Invalid species JSON: object\n{}\ndoes not have a 'base_stats' field", member_pretty))
+                                    None => panic!("Invalid species JSON: object\n{}\ndoes not have a 'base_stats' field", member_pretty)
                                 }
 
                                 let mut move_pool = Vec::new();
@@ -172,17 +178,17 @@ pub fn initialize_species() {
                                                         Some(string) => {
                                                             match Move::id_by_name(string) {
                                                                 Ok(move_) => move_pool.push(move_),
-                                                                Err(_) => panic!(format!("Invalid species JSON: '{}' in object\n{}\nis not a valid move", string, member_pretty))
+                                                                Err(_) => panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid move", string, member_pretty)
                                                             }
                                                         },
-                                                        None => panic!(format!("Invalid species JSON: 'move_pool' in object\n{}\ncontains invalid strings", member_pretty))
+                                                        None => panic!("Invalid species JSON: 'move_pool' in object\n{}\ncontains invalid strings", member_pretty)
                                                     }
                                                 }
                                             },
-                                            _ => panic!(format!("Invalid species JSON: 'move_pool' in object\n{}\nis not an array", member_pretty))
+                                            _ => panic!("Invalid species JSON: 'move_pool' in object\n{}\nis not an array", member_pretty)
                                         }
                                     },
-                                    None => panic!(format!("Invalid species JSON: object\n{}\ndoes not have a 'move_pool' field", member_pretty))
+                                    None => panic!("Invalid species JSON: object\n{}\ndoes not have a 'move_pool' field", member_pretty)
                                 }
 
                                 unsafe {
@@ -196,15 +202,12 @@ pub fn initialize_species() {
                                         weight: extract_u16("weight"),
                                         male_chance: extract_u16("male_chance"),
                                         female_chance: extract_u16("female_chance"),
-                                        allow_duplicates: object.get("allow_duplicates")
-                                            .expect(format!("Invalid species JSON: object\n{}\ndoes not have an 'allow_duplicates' field", member_pretty).as_str())
-                                            .as_bool()
-                                            .expect(format!("Invalid species JSON: 'allow_duplicates' in object\n{}\nis not a boolean", member_pretty).as_str()),
+                                        allow_duplicates: extract_bool("allow_duplicates"),
                                         move_pool
                                     });
                                 }
                             },
-                            _ => panic!(format!("Invalid species JSON: member\n{}\nis not an object", member_pretty))
+                            _ => panic!("Invalid species JSON: member\n{}\nis not an object", member_pretty)
                         }
                     }
                 },

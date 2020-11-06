@@ -1,22 +1,37 @@
 use std::cmp::{max, min};
 use std::fmt::{Debug, Error, Formatter};
+use std::fs;
+use std::process::exit;
 
 use rand::Rng;
+use rand::prelude::StdRng;
 
 use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, StatIndex, Type, clamp};
 use crate::pokemon::Pokemon;
 use crate::state::State;
-use rand::prelude::StdRng;
 use crate::species::Species;
+use json::JsonValue;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MoveCategory {
     Physical,
     Special,
     Status
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+impl MoveCategory {
+    fn by_name(name: &str) -> Result<MoveCategory, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "physical" => Ok(MoveCategory::Physical),
+            "special"  => Ok(MoveCategory::Special),
+            "status"   => Ok(MoveCategory::Status),
+            _ => Err(format!("Invalid move category '{}'", name))
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MoveTargeting {
     RandomOpponent,
     SingleAdjacentAlly,
@@ -34,6 +49,26 @@ pub enum MoveTargeting {
 }
 
 impl MoveTargeting {
+    fn by_name(name: &str) -> Result<MoveTargeting, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "randomopponent"         => Ok(MoveTargeting::RandomOpponent),
+            "singleadjacentally"     => Ok(MoveTargeting::SingleAdjacentAlly),
+            "singleadjacentopponent" => Ok(MoveTargeting::SingleAdjacentOpponent),
+            "singleadjacentpokemon"  => Ok(MoveTargeting::SingleAdjacentPokemon),
+            "singlepokemon"          => Ok(MoveTargeting::SinglePokemon),
+            "user"                   => Ok(MoveTargeting::User),
+            "useroradjacentally"     => Ok(MoveTargeting::UserOrAdjacentAlly),
+            "userandallallies"       => Ok(MoveTargeting::UserAndAllAllies),
+            "alladjacentopponents"   => Ok(MoveTargeting::AllAdjacentOpponents),
+            "alladjacentpokemon"     => Ok(MoveTargeting::AllAdjacentPokemon),
+            "allallies"              => Ok(MoveTargeting::AllAllies),
+            "allopponents"           => Ok(MoveTargeting::AllOpponents),
+            "allpokemon"             => Ok(MoveTargeting::AllPokemon),
+            _ => Err(format!("Invalid move targeting '{}'", name))
+        }
+    }
+
     const fn _single_target(&self) -> bool {
         matches!(self, MoveTargeting::RandomOpponent
                      | MoveTargeting::SingleAdjacentAlly
@@ -188,7 +223,7 @@ impl Action {
                             if (move_.effect)(state, action_queue, *user_id, target_id, rng) {
                                 return true;
                             }
-                        }
+                        },
                         None => {
                             if cfg!(feature = "print-battle") {
                                 state.display_text.push(String::from("- None"));
@@ -207,7 +242,7 @@ impl Action {
 pub type MoveID = u8;
 
 pub struct Move {
-    name: &'static str,
+    name: String,
     type_: Type,
     category: MoveCategory,
     targeting: MoveTargeting,
@@ -262,63 +297,101 @@ static mut MOVES: Vec<Move> = vec![];
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and before the species are initialized.
-pub unsafe fn initialize_moves() {
-    MOVES = vec![
-        Move {
-            name: "Growl",
-            type_: Type::Normal,
-            category: MoveCategory::Status,
-            targeting: MoveTargeting::AllAdjacentOpponents,
-            max_pp: 40,
-            priority_stage: 0,
-            sound_based: true,
-            effect: growl
+pub fn initialize_moves() {
+    let mut path = String::from("resources/");
+    path.push_str(game_version().name());
+    path.push_str("/moves.json");
+    let moves_json = fs::read_to_string(path.as_str()).unwrap_or_else(|_| panic!("Failed to read {}.", path));
+
+    match json::parse(moves_json.as_str()) {
+        json::Result::Ok(parsed) => {
+            match parsed {
+                JsonValue::Array(array) => {
+                    for member in array {
+                        let member_pretty = member.pretty(4);
+                        match member {
+                            JsonValue::Object(object) => {
+                                let extract_string = |key: &str| -> &str {
+                                    object.get(key)
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
+                                        .as_str()
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a String", key, member_pretty))
+                                };
+                                let extract_type = |key: &str| -> Type {
+                                    let string = extract_string(key);
+                                    Type::by_name(string)
+                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
+                                };
+                                let extract_category = |key: &str| -> MoveCategory {
+                                    let string = extract_string(key);
+                                    MoveCategory::by_name(string)
+                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
+                                };
+                                let extract_targeting = |key: &str| -> MoveTargeting {
+                                    let string = extract_string(key);
+                                    MoveTargeting::by_name(string)
+                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
+                                };
+                                let extract_u8 = |key: &str| -> u8 {
+                                    object.get(key)
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
+                                        .as_u8()
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty))
+                                };
+                                let extract_i8 = |key: &str| -> i8 {
+                                    object.get(key)
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
+                                        .as_i8()
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid i8 number", key, member_pretty))
+                                };
+                                let extract_bool = |key: &str| -> bool {
+                                    object.get(key)
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
+                                        .as_bool()
+                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid boolean", key, member_pretty))
+                                };
+
+                                let name = extract_string("name");
+                                let type_ = extract_type("type");
+                                let category = extract_category("category");
+                                unsafe {
+                                    MOVES.push(Move {
+                                        name: name.to_owned(),
+                                        type_,
+                                        category: if game_version().gen() <= 3 && category != MoveCategory::Status { type_.category() } else { category },
+                                        targeting: extract_targeting("targeting"),
+                                        max_pp: extract_u8("max_pp"),
+                                        priority_stage: extract_i8("priority_stage"),
+                                        sound_based: extract_bool("sound_based"),
+                                        effect: move_function_by_name(name)
+                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid move", name, member_pretty))
+                                    });
+                                }
+                            },
+                            _ => panic!("Invalid moves JSON: member\n{}\nis not an object", member_pretty)
+                        }
+                    }
+                },
+                _ => panic!("Invalid moves JSON: not an array of objects")
+            }
         },
-        Move {
-            name: "Leech Seed",
-            type_: Type::Grass,
-            category: MoveCategory::Status,
-            targeting: MoveTargeting::SingleAdjacentOpponent,
-            max_pp: 10,
-            priority_stage: 0,
-            sound_based: false,
-            effect: leech_seed
-        },
-        Move {
-            name: "Struggle",
-            type_: Type::None,
-            category: MoveCategory::Physical,
-            targeting: MoveTargeting::RandomOpponent,
-            max_pp: 1,
-            priority_stage: 0,
-            sound_based: false,
-            effect: struggle
-        },
-        Move {
-            name: "Tackle",
-            type_: Type::Normal,
-            category: MoveCategory::Physical,
-            targeting: MoveTargeting::SingleAdjacentOpponent,
-            max_pp: 35,
-            priority_stage: 0,
-            sound_based: false,
-            effect: tackle
-        },
-        Move {
-            name: "Vine Whip",
-            type_: Type::Grass,
-            category: MoveCategory::Physical,
-            targeting: MoveTargeting::SingleAdjacentOpponent,
-            max_pp: match game_version().gen() {
-                1..=3 => 10,
-                4..=5 => 15,
-                _ => 25
-            },
-            priority_stage: 0,
-            sound_based: false,
-            effect: vine_whip
+        json::Result::Err(error) => {
+            println!("{}", error);
+            exit(1);
         }
-    ];
+    }
+}
+
+fn move_function_by_name(name: &str) -> Result<fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool, String> {
+    let n = name.to_ascii_lowercase();
+    match n.as_str() {
+        "growl"      => Ok(growl),
+        "leech seed" => Ok(leech_seed),
+        "struggle"   => Ok(struggle),
+        "tackle"     => Ok(tackle),
+        "vine whip"  => Ok(vine_whip),
+        _ => Err(format!("Invalid move '{}'", name))
+    }
 }
 
 // ---- MOVE FUNCTIONS ---- //
