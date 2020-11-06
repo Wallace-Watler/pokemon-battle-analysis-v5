@@ -7,7 +7,6 @@ use rand::Rng;
 use rand::prelude::StdRng;
 
 use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, StatIndex, Type, clamp};
-use crate::pokemon::Pokemon;
 use crate::state::State;
 use crate::species::Species;
 use json::JsonValue;
@@ -400,12 +399,10 @@ fn critical_hit_chance(critical_hit_stage_bonus: usize) -> f64 {
     let mut c: usize = 0;
     c += critical_hit_stage_bonus;
     c = min(c, 4);
-    if game_version().gen() <= 5 {
-        [1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 3.0, 1.0 / 2.0][c]
-    } else if game_version().gen() == 6 {
-        [1.0 / 16.0, 1.0 / 8.0, 1.0 / 2.0, 1.0, 1.0][c]
-    } else {
-        [1.0 / 24.0, 1.0 / 8.0, 1.0 / 2.0, 1.0, 1.0][c]
+    match game_version().gen() {
+        1..=5 => [1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 3.0, 1.0 / 2.0][c],
+        6 => [1.0 / 16.0, 1.0 / 8.0, 1.0 / 2.0, 1.0, 1.0][c],
+        _ => [1.0 / 24.0, 1.0 / 8.0, 1.0 / 2.0, 1.0, 1.0][c]
     }
 }
 
@@ -417,46 +414,118 @@ fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(3, 3 + stat_stage) as f64 / max(3, 3 - stat_stage) as f64
 }
 
-fn std_accuracy_check(user: &Pokemon, target: &Pokemon, accuracy: u8, rng: &mut StdRng) -> bool {
-    rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
-}
-
-fn std_base_damage(move_power: u32, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
-    let attack_multiplier = if critical_hit && offensive_stat_stage < 0 { 1.0 } else { main_stat_stage_multiplier(offensive_stat_stage) };
-    let defense_multiplier = if critical_hit && defensive_stat_stage > 0 { 1.0 } else { main_stat_stage_multiplier(defensive_stat_stage) };
-    (42 * move_power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
-}
-
-fn growl(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !std_accuracy_check(state.pokemon_by_id(user_id), state.pokemon_by_id(target_id), 100, rng) {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("{} avoided the attack!", target_name));
-        }
-        return false;
+/// Returns whether the move should hit.
+fn std_accuracy_check(state: &mut State, user_id: u8, target_id: u8, accuracy: u8, rng: &mut StdRng) -> bool {
+    let user = state.pokemon_by_id(user_id);
+    let target = state.pokemon_by_id(target_id);
+    if rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8 {
+        return true;
     }
-
-    pokemon::increment_stat_stage(state, target_id, StatIndex::Atk, -1);
+    if cfg!(feature = "print-battle") {
+        let target_name = Species::name(target.species);
+        state.display_text.push(format!("{} avoided the attack!", target_name));
+    }
     false
 }
 
-fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let accuracy_check;
-    let target_is_grass_type;
+fn std_base_damage(power: u32, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
+    let attack_multiplier = if critical_hit && offensive_stat_stage < 0 { 1.0 } else { main_stat_stage_multiplier(offensive_stat_stage) };
+    let defense_multiplier = if critical_hit && defensive_stat_stage > 0 { 1.0 } else { main_stat_stage_multiplier(defensive_stat_stage) };
+    (42 * power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
+}
+
+/// Returns whether the battle has ended and the damage dealt to the target.
+fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u32, critical_hit_stage_bonus: usize, rng: &mut StdRng) -> (bool, i16) {
+    let target_first_type;
+    let target_second_type;
+    let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
+    let defensive_stat_index = if category == MoveCategory::Physical { StatIndex::Def } else { StatIndex::SpDef };
+    let user_ability;
+    let user_current_hp;
+    let user_max_hp;
+    let offensive_stat_stage;
+    let defensive_stat_stage;
+    let user_major_status_ailment;
     {
         let user = state.pokemon_by_id(user_id);
         let target = state.pokemon_by_id(target_id);
-        accuracy_check = std_accuracy_check(user, target, 90, rng);
-        target_is_grass_type = target.is_type(Type::Grass);
+        target_first_type = target.first_type;
+        target_second_type = target.second_type;
+        user_ability = user.ability;
+        user_current_hp = user.current_hp;
+        user_max_hp = user.max_hp;
+        offensive_stat_stage = user.stat_stage(offensive_stat_index);
+        defensive_stat_stage = target.stat_stage(defensive_stat_index);
+        user_major_status_ailment = user.major_status_ailment();
     }
 
-    if !accuracy_check {
+    let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
+    if almost::zero(type_effectiveness) {
         if cfg!(feature = "print-battle") {
             let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("{} avoided the attack!", target_name));
+            state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
-        return false;
+        return (false, 0);
     }
+
+    let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
+    let calculated_def = pokemon::calculated_stat(state, target_id, defensive_stat_index);
+
+    if damage_type == Type::Grass && user_ability == Ability::id_by_name("Overgrow").unwrap() && user_current_hp < user_max_hp / 3 {
+        calculated_atk = (calculated_atk as f64 * 1.5) as u32;
+    }
+
+    /*
+     Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
+     - Multi-target modifier (TODO?)
+     - Weather modifier (TODO)
+     - If critical hit, multiply by 1.5 (by 2 prior to 6th gen)
+     - Random integer between 85 and 100 divided by 100
+     - STAB
+     - Type effectiveness
+     - Halve damage if user is burned
+     - damage = max(damage, 1)
+     */
+
+    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(critical_hit_stage_bonus)) {
+        if cfg!(feature = "print-battle") {
+            state.display_text.push(String::from("It's a critical hit!"));
+        }
+        std_base_damage(power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
+    } else {
+        std_base_damage(power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
+    };
+
+    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
+    if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
+        modified_damage *= 1.5;
+    }
+    modified_damage *= type_effectiveness;
+    if cfg!(feature = "print-battle") {
+        if type_effectiveness < 0.9 {
+            state.display_text.push(String::from("It's not very effective..."));
+        } else if type_effectiveness > 1.1 {
+            state.display_text.push(String::from("It's super effective!"));
+        }
+    }
+    if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
+    modified_damage = modified_damage.max(1.0);
+
+    let damage_dealt = modified_damage.round() as i16;
+    (pokemon::apply_damage(state, target_id, damage_dealt), damage_dealt)
+}
+
+/// Returns whether the battle has ended.
+fn growl(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    if std_accuracy_check(state, user_id, target_id, 100, rng) {
+        pokemon::increment_stat_stage(state, target_id, StatIndex::Atk, -1);
+    }
+    false
+}
+
+/// Returns whether the battle has ended.
+fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    if !std_accuracy_check(state, user_id, target_id, 90, rng) { return false; }
 
     match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
@@ -466,7 +535,7 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
             }
         },
         None => {
-            if target_is_grass_type {
+            if state.pokemon_by_id(target_id).is_type(Type::Grass) {
                 if cfg!(feature = "print-battle") {
                     let target_name = Species::name(state.pokemon_by_id(target_id).species);
                     state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
@@ -484,72 +553,20 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
     false
 }
 
+/// Returns whether the battle has ended.
 fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let accuracy_check;
-    let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
-    let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
-    let defensive_stat_index = if category == MoveCategory::Physical { StatIndex::Def } else { StatIndex::SpDef };
-    let offensive_stat_stage;
-    let defensive_stat_stage;
-    let user_max_hp;
-    let user_major_status_ailment;
-    {
-        let user = state.pokemon_by_id(user_id);
-        let target = state.pokemon_by_id(target_id);
-        accuracy_check = game_version().gen() >= 4 || std_accuracy_check(user, target, 100, rng);
-        offensive_stat_stage = user.stat_stage(offensive_stat_index);
-        defensive_stat_stage = target.stat_stage(defensive_stat_index);
-        user_max_hp = user.max_hp;
-        user_major_status_ailment = user.major_status_ailment();
-    }
+    if !(game_version().gen() >= 4 || std_accuracy_check(state, user_id, target_id, 100, rng)) { return false; }
 
-    if !accuracy_check {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("{} avoided the attack!", target_name));
-        }
-        return false;
-    }
+    let damage_type = Type::None;
+    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
+    let (battle_ended, damage_dealt) = std_damage(state, user_id, target_id, damage_type, category, 50, 0, rng);
+    if battle_ended { return true; }
 
-    let calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
-    let calculated_def = pokemon::calculated_stat(state, target_id, defensive_stat_index);
-
-    /*
-     Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
-     - Multi-target modifier (?)
-     - Weather modifier (TODO)
-     - If critical hit, multiply by 1.5 (by 2 prior to 6th gen)
-     - Random integer between 85 and 100 divided by 100
-     - STAB
-     - Type effectiveness
-     - Halve damage if user is burned
-     - damage = max(damage, 1)
-     */
-
-    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
-        if cfg!(feature = "print-battle") {
-            state.display_text.push(String::from("It's a critical hit!"));
-        }
-        std_base_damage(50, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
-    } else {
-        std_base_damage(50, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
-    };
-
-    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
-    if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
-    modified_damage = modified_damage.max(1.0);
-
-    let damage_dealt = modified_damage.round() as i16;
-    if pokemon::apply_damage(state, target_id, damage_dealt) {
-        return true;
-    }
-
-    let recoil_damage = if game_version().gen() <= 3 {
-        max(damage_dealt / 4, 1) as i16
-    } else if game_version().gen() == 4 {
-        max(user_max_hp / 4, 1) as i16
-    } else {
-        max((user_max_hp as f64 / 4.0).round() as i16, 1)
+    let user_max_hp = state.pokemon_by_id(user_id).max_hp;
+    let recoil_damage = match game_version().gen() {
+        1..=3 => max(damage_dealt / 4, 1) as i16,
+        4 => max(user_max_hp / 4, 1) as i16,
+        _ => max((user_max_hp as f64 / 4.0).round() as i16, 1)
     };
     if cfg!(feature = "print-battle") {
         let user_display_text = format!("{}", state.pokemon_by_id(user_id));
@@ -558,173 +575,30 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
     pokemon::apply_damage(state, user_id, recoil_damage)
 }
 
+/// Returns whether the battle has ended.
 fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let accuracy_check;
-    let target_first_type;
-    let target_second_type;
-    let category = if game_version().gen() <= 3 { Type::Normal.category() } else { MoveCategory::Physical };
-    let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
-    let defensive_stat_index = if category == MoveCategory::Physical { StatIndex::Def } else { StatIndex::SpDef };
-    let offensive_stat_stage;
-    let defensive_stat_stage;
-    let user_major_status_ailment;
-    {
-        let user = state.pokemon_by_id(user_id);
-        let target = state.pokemon_by_id(target_id);
-        accuracy_check = std_accuracy_check(user, target, if game_version().gen() <= 4 { 95 } else { 100 }, rng);
-        target_first_type = target.first_type;
-        target_second_type = target.second_type;
-        offensive_stat_stage = user.stat_stage(offensive_stat_index);
-        defensive_stat_stage = target.stat_stage(defensive_stat_index);
-        user_major_status_ailment = user.major_status_ailment();
-    }
-
-    if !accuracy_check {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("{} avoided the attack!", target_name));
-        }
+    if !std_accuracy_check(state, user_id, target_id, if game_version().gen() <= 4 { 95 } else { 100 }, rng) {
         return false;
     }
 
     let damage_type = Type::Normal;
-    let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
-    if almost::zero(type_effectiveness) {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
-        }
-        return false;
-    }
-
-    let calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
-    let calculated_def = pokemon::calculated_stat(state, target_id, defensive_stat_index);
-
-    /*
-     Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
-     - Multi-target modifier (?)
-     - Weather modifier (TODO)
-     - If critical hit, multiply by 1.5 (by 2 prior to 6th gen)
-     - Random integer between 85 and 100 divided by 100
-     - STAB
-     - Type effectiveness
-     - Halve damage if user is burned
-     - damage = max(damage, 1)
-     */
-
-    let move_power = match game_version().gen() {
+    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
+    let power = match game_version().gen() {
         1..=4 => 35,
         5..=6 => 50,
         _ => 40
     };
-    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
-        if cfg!(feature = "print-battle") {
-            state.display_text.push(String::from("It's a critical hit!"));
-        }
-        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
-    } else {
-        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
-    };
-
-    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
-        modified_damage *= 1.5; }
-    modified_damage *= type_effectiveness;
-    if cfg!(feature = "print-battle") {
-        if type_effectiveness < 0.9 {
-            state.display_text.push(String::from("It's not very effective..."));
-        } else if type_effectiveness > 1.1 {
-            state.display_text.push(String::from("It's super effective!"));
-        }
-    }
-    if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
-    modified_damage = modified_damage.max(1.0);
-
-    pokemon::apply_damage(state, target_id, modified_damage.round() as i16)
+    std_damage(state, user_id, target_id, damage_type, category, power, 0, rng).0
 }
 
+/// Returns whether the battle has ended.
 fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let accuracy_check;
-    let target_first_type;
-    let target_second_type;
-    let category = if game_version().gen() <= 3 { Type::Grass.category() } else { MoveCategory::Physical };
-    let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
-    let defensive_stat_index = if category == MoveCategory::Physical { StatIndex::Def } else { StatIndex::SpDef };
-    let offensive_stat_stage;
-    let defensive_stat_stage;
-    let user_major_status_ailment;
-    {
-        let user = state.pokemon_by_id(user_id);
-        let target = state.pokemon_by_id(target_id);
-        accuracy_check = std_accuracy_check(user, target, 100, rng);
-        target_first_type = target.first_type;
-        target_second_type = target.second_type;
-        offensive_stat_stage = user.stat_stage(offensive_stat_index);
-        defensive_stat_stage = target.stat_stage(defensive_stat_index);
-        user_major_status_ailment = user.major_status_ailment();
-    }
-
-    if !accuracy_check {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("{} avoided the attack!", target_name));
-        }
+    if !std_accuracy_check(state, user_id, target_id, 100, rng) {
         return false;
     }
 
     let damage_type = Type::Grass;
-    let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
-    if almost::zero(type_effectiveness) {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species);
-            state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
-        }
-        return false;
-    }
-
-    let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
-    let calculated_def = pokemon::calculated_stat(state, target_id, defensive_stat_index);
-
-    {
-        let user = state.pokemon_by_id(user_id);
-        if user.ability == Ability::id_by_name("Overgrow").unwrap() && user.current_hp < user.max_hp / 3 { calculated_atk = (calculated_atk as f64 * 1.5) as u32; }
-    }
-
-    /*
-     Multiply base damage by the following modifiers (in no particular order), rounding up/down at the end
-     - Multi-target modifier (?)
-     - Weather modifier (TODO)
-     - If critical hit, multiply by 1.5 (by 2 prior to 6th gen)
-     - Random integer between 85 and 100 divided by 100
-     - STAB
-     - Type effectiveness
-     - Halve damage if user is burned
-     - damage = max(damage, 1)
-     */
-
-    let move_power = if game_version().gen() <= 5 { 35 } else { 45 };
-    let mut modified_damage: f64 = if rng.gen_bool(critical_hit_chance(0)) {
-        if cfg!(feature = "print-battle") {
-            state.display_text.push(String::from("It's a critical hit!"));
-        }
-        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, true) as f64 * if game_version().gen() < 6 { 2.0 } else { 1.5 }
-    } else {
-        std_base_damage(move_power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
-    };
-
-    modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
-    if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
-        modified_damage *= 1.5; }
-    modified_damage *= type_effectiveness;
-    if cfg!(feature = "print-battle") {
-        if type_effectiveness < 0.9 {
-            state.display_text.push(String::from("It's not very effective..."));
-        } else if type_effectiveness > 1.1 {
-            state.display_text.push(String::from("It's super effective!"));
-        }
-    }
-    if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
-    modified_damage = modified_damage.max(1.0);
-
-    pokemon::apply_damage(state, target_id, modified_damage.round() as i16)
+    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
+    let power = if game_version().gen() <= 5 { 35 } else { 45 };
+    std_damage(state, user_id, target_id, damage_type, category, power, 0, rng).0
 }
