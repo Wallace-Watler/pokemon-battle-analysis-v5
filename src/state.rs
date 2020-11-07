@@ -27,7 +27,7 @@ pub struct State {
     pub display_text: Vec<String>,
     pub children: Vec<State>,
     pub num_maximizer_actions: usize,
-    pub num_minimizer_actions: usize,
+    pub num_minimizer_actions: usize
 }
 
 impl State {

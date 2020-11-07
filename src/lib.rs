@@ -288,7 +288,7 @@ impl Gender {
         }
     }
 
-    const fn _name(&self) -> &'static str {
+    const fn name(&self) -> &'static str {
         match self {
             Gender::None => "None",
             Gender::Male => "Male",
@@ -443,7 +443,7 @@ impl Nature {
 }
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-#[repr(usize)]
+#[repr(u8)]
 pub enum StatIndex {
     Hp,
     Atk,

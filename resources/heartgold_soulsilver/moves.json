@@ -7,7 +7,14 @@
         "targeting": "AllAdjacentOpponents",
         "max_pp": 40,
         "priority_stage": 0,
-        "sound_based": true
+        "sound_based": true,
+        "effects": [
+            {
+                "name": "IncTargetStatStage",
+                "stat_index": "Atk",
+                "amount": -1
+            }
+        ]
     },
     {
         "name": "Leech Seed",
@@ -17,7 +24,12 @@
         "targeting": "SingleAdjacentOpponent",
         "max_pp": 10,
         "priority_stage": 0,
-        "sound_based": false
+        "sound_based": false,
+        "effects": [
+            {
+                "name": "LeechSeed"
+            }
+        ]
     },
     {
         "name": "Struggle",
@@ -27,7 +39,12 @@
         "targeting": "RandomOpponent",
         "max_pp": 1,
         "priority_stage": 0,
-        "sound_based": false
+        "sound_based": false,
+        "effects": [
+            {
+                "name": "Struggle"
+            }
+        ]
     },
     {
         "name": "Tackle",
@@ -37,7 +54,13 @@
         "targeting": "SingleAdjacentOpponent",
         "max_pp": 35,
         "priority_stage": 0,
-        "sound_based": false
+        "sound_based": false,
+        "effects": [
+            {
+                "name": "StdDamage",
+                "power": 35
+            }
+        ]
     },
     {
         "name": "Vine Whip",
@@ -47,6 +70,12 @@
         "targeting": "SingleAdjacentOpponent",
         "max_pp": 15,
         "priority_stage": 0,
-        "sound_based": false
+        "sound_based": false,
+        "effects": [
+            {
+                "name": "StdDamage",
+                "power": 35
+            }
+        ]
     }
 ]

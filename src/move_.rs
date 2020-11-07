@@ -69,7 +69,7 @@ impl MoveTargeting {
         }
     }
 
-    const fn _single_target(&self) -> bool {
+    const fn single_target(&self) -> bool {
         matches!(self, MoveTargeting::RandomOpponent
                      | MoveTargeting::SingleAdjacentAlly
                      | MoveTargeting::SingleAdjacentOpponent
@@ -79,7 +79,7 @@ impl MoveTargeting {
                      | MoveTargeting::UserOrAdjacentAlly)
     }
 
-    const fn _only_targets_allies(&self) -> bool {
+    const fn only_targets_allies(&self) -> bool {
         matches!(self, MoveTargeting::SingleAdjacentAlly
                      | MoveTargeting::User
                      | MoveTargeting::UserOrAdjacentAlly
@@ -128,14 +128,10 @@ impl Action {
      */
     pub fn outspeeds(&self, state_box: &State, other_action: &Action, rng: &mut StdRng) -> bool {
         match other_action {
-            Action::Switch {user_id: _, switching_in_id: _} => {
-                false
-            },
+            Action::Switch {user_id: _, switching_in_id: _} => false,
             Action::Move {user_id: other_user_id, move_: other_move, move_index: _, target_positions: _} => {
                 match self {
-                    Action::Switch {user_id: _, switching_in_id: _} => {
-                        true
-                    },
+                    Action::Switch {user_id: _, switching_in_id: _} => true,
                     Action::Move {user_id, move_, move_index: _, target_positions: _} => {
                         let move_ = Move::by_id(*move_);
                         let other_move_ = Move::by_id(*other_move);
@@ -154,9 +150,7 @@ impl Action {
 
     pub fn can_be_performed(&self, state: &mut State, rng: &mut StdRng) -> bool {
         match self {
-            Action::Switch {user_id: _, switching_in_id: _} => {
-                true
-            },
+            Action::Switch {user_id: _, switching_in_id: _} => true,
             Action::Move {user_id, move_: _, move_index, target_positions: _} => {
                 let user_msa = state.pokemon_by_id(*user_id).major_status_ailment();
                 if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
@@ -227,45 +221,11 @@ impl Action {
                             };
 
                             if accuracy_check {
-                                /*
-                                let mut effect_result = None
-                                for effect in move_.effects {
-                                    effect_result = match effect {
-                                        ... // Code for each effect
-                                        // E.g. MoveEffect::RecoilByDamageDealt => {
-                                            match effect_result {
-                                                EffectResult::Hit(damage_dealt) => recoilByDamageDealt(damage_dealt),
-                                                _ => panic!()
-                                            }
-                                        }
-                                    }
-                                }
-                                */
-                                /*let mut effect_result = EffectResult::None;
-                                for effect in move_.effects {
-                                    effect_result = match effect {
-                                        MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
-
-                                        },
-                                        MoveEffect::IncTargetStatStage(stat_index, amount) => {
-
-                                        },
-                                        MoveEffect::LeechSeed => {
-
-                                        },
-                                        MoveEffect::Struggle => {
-
-                                        }
-                                    }
-                                    if effect_result == EffectResult::BattleEnded {
+                                for effect in move_.effects.iter() {
+                                    if effect.do_effect(*move_id, state, action_queue, *user_id, target_id, rng) == EffectResult::BattleEnded {
                                         return true;
                                     }
-                                }*/
-
-                                // TODO: Replace with the thing in todo.txt
-                                //if (move_.effect)(move_, state, action_queue, *user_id, target_id, rng) {
-                                //    return true;
-                                //}
+                                }
                             } else if cfg!(feature = "print-battle") {
                                 let target_name = Species::name(state.pokemon_by_id(target_id).species);
                                 state.display_text.push(format!("{} avoided the attack!", target_name));
@@ -298,7 +258,6 @@ pub struct Move {
     max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool,
     effects: Vec<MoveEffect>
 }
 
@@ -318,6 +277,15 @@ impl Move {
         unsafe {
             &MOVES[move_id as usize]
         }
+    }
+
+    fn category(move_: MoveID) -> MoveCategory {
+        let move_ = Move::by_id(move_);
+        let category = move_.category;
+        if category != MoveCategory::Status && game_version().gen() <= 3 {
+            return move_.type_.category();
+        }
+        category
     }
 
     pub fn targeting(move_: MoveID) -> MoveTargeting {
@@ -344,24 +312,6 @@ impl Debug for Move {
 }
 
 static mut MOVES: Vec<Move> = vec![];
-
-enum MoveEffect {
-    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
-    StdDamage(Type, u8, u8, u8),
-    /// (stat_index: StatIndex, amount: i8)
-    IncTargetStatStage(StatIndex, i8),
-    LeechSeed,
-    Struggle
-}
-
-enum EffectResult {
-    /// (damage_dealt: i16)
-    Hit(i16),
-    Fail,
-    BattleEnded,
-    /// No effects have been done yet
-    None
-}
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and before the species are initialized.
@@ -504,8 +454,6 @@ pub fn initialize_moves() {
                                         max_pp: extract_u8("max_pp"),
                                         priority_stage: extract_i8("priority_stage"),
                                         sound_based: extract_bool("sound_based"),
-                                        effect: move_function_by_name(name)
-                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid move", name, member_pretty)),
                                         effects
                                     });
                                 }
@@ -524,23 +472,45 @@ pub fn initialize_moves() {
     }
 }
 
-fn move_function_by_name(name: &str) -> Result<fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool, String> {
-    let n = name.to_ascii_lowercase();
-    match n.as_str() {
-        "growl"      => Ok(growl),
-        "leech seed" => Ok(leech_seed),
-        "struggle"   => Ok(struggle),
-        "tackle"     => Ok(tackle),
-        "vine whip"  => Ok(vine_whip),
-        _ => Err(format!("Invalid move '{}'", name))
+enum MoveEffect {
+    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
+    StdDamage(Type, u8, u8, u8),
+    /// (stat_index: StatIndex, amount: i8)
+    IncTargetStatStage(StatIndex, i8),
+    LeechSeed,
+    Struggle
+}
+
+impl MoveEffect {
+    fn do_effect(&self, move_: MoveID, state: &mut State, action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
+        match self {
+            MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
+                std_damage(state, user_id, target_id, *damage_type, Move::category(move_), *power, *critical_hit_stage_bonus, *recoil_divisor, rng)
+            },
+            MoveEffect::IncTargetStatStage(stat_index, amount) => {
+                pokemon::increment_stat_stage(state, target_id, *stat_index, *amount);
+                EffectResult::Pass
+            },
+            MoveEffect::LeechSeed => {
+                leech_seed(state, user_id, target_id)
+            },
+            MoveEffect::Struggle => {
+                struggle(state, user_id, target_id, rng)
+            }
+        }
     }
 }
 
-// ---- MOVE FUNCTIONS ---- //
+#[derive(Eq, PartialEq)]
+enum EffectResult {
+    Pass,
+    Fail,
+    BattleEnded
+}
 
-fn critical_hit_chance(critical_hit_stage_bonus: usize) -> f64 {
-    let mut c: usize = 0;
-    c += critical_hit_stage_bonus;
+fn critical_hit_chance(critical_hit_stage_bonus: u8) -> f64 {
+    let mut c = 0;
+    c += critical_hit_stage_bonus as usize;
     c = min(c, 4);
     match game_version().gen() {
         1..=5 => [1.0 / 16.0, 1.0 / 8.0, 1.0 / 4.0, 1.0 / 3.0, 1.0 / 2.0][c],
@@ -557,14 +527,16 @@ fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(3, 3 + stat_stage) as f64 / max(3, 3 - stat_stage) as f64
 }
 
-fn std_base_damage(power: u32, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
+fn std_base_damage(power: u8, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
     let attack_multiplier = if critical_hit && offensive_stat_stage < 0 { 1.0 } else { main_stat_stage_multiplier(offensive_stat_stage) };
     let defense_multiplier = if critical_hit && defensive_stat_stage > 0 { 1.0 } else { main_stat_stage_multiplier(defensive_stat_stage) };
-    (42 * power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
+    (42 * power as u32 * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
+// ---- MOVE EFFECTS ---- //
+
 /// Returns whether the battle has ended.
-fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u32, critical_hit_stage_bonus: usize, recoil_divisor: u8, rng: &mut StdRng) -> bool {
+fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8, rng: &mut StdRng) -> EffectResult {
     let target_first_type;
     let target_second_type;
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -594,7 +566,7 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
             let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
-        return false;
+        return EffectResult::Fail;
     }
 
     let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
@@ -641,10 +613,13 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
     modified_damage = modified_damage.max(1.0);
 
     let damage_dealt = modified_damage.round() as i16;
-    pokemon::apply_damage(state, target_id, damage_dealt) || recoil(state, user_id, damage_dealt, recoil_divisor)
+    if pokemon::apply_damage(state, target_id, damage_dealt) {
+        return EffectResult::BattleEnded;
+    }
+    recoil(state, user_id, damage_dealt, recoil_divisor)
 }
 
-fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8) -> bool {
+fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8) -> EffectResult {
     if recoil_divisor > 0 {
         let recoil_damage = if game_version().gen() <= 4 {
             max(damage_dealt / recoil_divisor as i16, 1)
@@ -655,25 +630,22 @@ fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8)
             let user_display_text = format!("{}", state.pokemon_by_id(user_id));
             state.display_text.push(format!("{} took recoil damage!", user_display_text));
         }
-        return pokemon::apply_damage(state, user_id, recoil_damage);
+        if pokemon::apply_damage(state, user_id, recoil_damage) {
+            return EffectResult::BattleEnded;
+        }
     }
-    false
+    EffectResult::Pass
 }
 
 /// Returns whether the battle has ended.
-fn growl(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    pokemon::increment_stat_stage(state, target_id, StatIndex::Atk, -1);
-    false
-}
-
-/// Returns whether the battle has ended.
-fn leech_seed(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
     match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
             if cfg!(feature = "print-battle") {
                 let target_name = Species::name(state.pokemon_by_id(target_id).species);
                 state.display_text.push(format!("{} is already seeded!", target_name));
             }
+            EffectResult::Fail
         },
         None => {
             if state.pokemon_by_id(target_id).is_type(Type::Grass) {
@@ -681,47 +653,30 @@ fn leech_seed(move_: &Move, state: &mut State, _action_queue: &[&Action], user_i
                     let target_name = Species::name(state.pokemon_by_id(target_id).species);
                     state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
                 }
+                EffectResult::Fail
             } else {
                 state.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
                 if cfg!(feature = "print-battle") {
                     let target_name = Species::name(state.pokemon_by_id(target_id).species);
                     state.display_text.push(format!("A seed was planted on {}!", target_name));
                 }
+                EffectResult::Pass
             }
         }
     }
-
-    false
 }
 
 /// Returns whether the battle has ended.
-fn struggle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
+fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
     match game_version().gen() {
         1..=3 => {
-            std_damage(state, user_id, target_id, move_.type_, category, 50, 0, 4, rng)
+            std_damage(state, user_id, target_id, Type::None, MoveCategory::Physical, 50, 0, 4, rng)
         },
         _ => {
-            std_damage(state, user_id, target_id, move_.type_, category, 50, 0, 0, rng)
-                || recoil(state, user_id, state.pokemon_by_id(user_id).max_hp as i16, 4)
+            if std_damage(state, user_id, target_id, Type::None, MoveCategory::Physical, 50, 0, 0, rng) == EffectResult::BattleEnded {
+                return EffectResult::BattleEnded;
+            }
+            recoil(state, user_id, state.pokemon_by_id(user_id).max_hp as i16, 4)
         }
     }
-}
-
-/// Returns whether the battle has ended.
-fn tackle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
-    let power = match game_version().gen() {
-        1..=4 => 35,
-        5..=6 => 50,
-        _ => 40
-    };
-    std_damage(state, user_id, target_id, move_.type_, category, power, 0, 0, rng)
-}
-
-/// Returns whether the battle has ended.
-fn vine_whip(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
-    let power = if game_version().gen() <= 5 { 35 } else { 45 };
-    std_damage(state, user_id, target_id, move_.type_, category, power, 0, 0, rng)
 }
