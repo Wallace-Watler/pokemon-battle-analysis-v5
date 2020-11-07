@@ -219,8 +219,19 @@ impl Action {
                                 state.display_text.push(format!("- {}", target_display_text));
                             }
 
-                            if (move_.effect)(state, action_queue, *user_id, target_id, rng) {
-                                return true;
+                            let accuracy_check = move_.accuracy == 0 || {
+                                let user = state.pokemon_by_id(*user_id);
+                                let target = state.pokemon_by_id(target_id);
+                                rng.gen_range::<u8, u8, u8>(0, 100) < (move_.accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
+                            };
+
+                            if accuracy_check {
+                                if (move_.effect)(move_, state, action_queue, *user_id, target_id, rng) {
+                                    return true;
+                                }
+                            } else if cfg!(feature = "print-battle") {
+                                let target_name = Species::name(state.pokemon_by_id(target_id).species);
+                                state.display_text.push(format!("{} avoided the attack!", target_name));
                             }
                         },
                         None => {
@@ -244,11 +255,13 @@ pub struct Move {
     name: String,
     type_: Type,
     category: MoveCategory,
+    /// An accuracy of 0 means this move ignores accuracy checks and will always hit.
+    accuracy: u8,
     targeting: MoveTargeting,
     max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool
+    effect: fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool
 }
 
 impl Move {
@@ -358,6 +371,7 @@ pub fn initialize_moves() {
                                         name: name.to_owned(),
                                         type_,
                                         category: if game_version().gen() <= 3 && category != MoveCategory::Status { type_.category() } else { category },
+                                        accuracy: extract_u8("accuracy"),
                                         targeting: extract_targeting("targeting"),
                                         max_pp: extract_u8("max_pp"),
                                         priority_stage: extract_i8("priority_stage"),
@@ -381,7 +395,7 @@ pub fn initialize_moves() {
     }
 }
 
-fn move_function_by_name(name: &str) -> Result<fn(&mut State, &[&Action], u8, u8, &mut StdRng) -> bool, String> {
+fn move_function_by_name(name: &str) -> Result<fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool, String> {
     let n = name.to_ascii_lowercase();
     match n.as_str() {
         "growl"      => Ok(growl),
@@ -412,20 +426,6 @@ fn main_stat_stage_multiplier(stat_stage: i8) -> f64 {
 
 fn accuracy_stat_stage_multiplier(stat_stage: i8) -> f64 {
     max(3, 3 + stat_stage) as f64 / max(3, 3 - stat_stage) as f64
-}
-
-/// Returns whether the move should hit.
-fn std_accuracy_check(state: &mut State, user_id: u8, target_id: u8, accuracy: u8, rng: &mut StdRng) -> bool {
-    let user = state.pokemon_by_id(user_id);
-    let target = state.pokemon_by_id(target_id);
-    if rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8 {
-        return true;
-    }
-    if cfg!(feature = "print-battle") {
-        let target_name = Species::name(target.species);
-        state.display_text.push(format!("{} avoided the attack!", target_name));
-    }
-    false
 }
 
 fn std_base_damage(power: u32, calculated_atk: u32, calculated_def: u32, offensive_stat_stage: i8, defensive_stat_stage: i8, critical_hit: bool) -> u32 {
@@ -516,17 +516,13 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
 }
 
 /// Returns whether the battle has ended.
-fn growl(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if std_accuracy_check(state, user_id, target_id, 100, rng) {
-        pokemon::increment_stat_stage(state, target_id, StatIndex::Atk, -1);
-    }
+fn growl(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    pokemon::increment_stat_stage(state, target_id, StatIndex::Atk, -1);
     false
 }
 
 /// Returns whether the battle has ended.
-fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !std_accuracy_check(state, user_id, target_id, 90, rng) { return false; }
-
+fn leech_seed(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
             if cfg!(feature = "print-battle") {
@@ -554,12 +550,9 @@ fn leech_seed(state: &mut State, _action_queue: &[&Action], user_id: u8, target_
 }
 
 /// Returns whether the battle has ended.
-fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !(game_version().gen() >= 4 || std_accuracy_check(state, user_id, target_id, 100, rng)) { return false; }
-
-    let damage_type = Type::None;
-    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
-    let (battle_ended, damage_dealt) = std_damage(state, user_id, target_id, damage_type, category, 50, 0, rng);
+fn struggle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
+    let (battle_ended, damage_dealt) = std_damage(state, user_id, target_id, move_.type_, category, 50, 0, rng);
     if battle_ended { return true; }
 
     let user_max_hp = state.pokemon_by_id(user_id).max_hp;
@@ -576,29 +569,19 @@ fn struggle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id
 }
 
 /// Returns whether the battle has ended.
-fn tackle(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !std_accuracy_check(state, user_id, target_id, if game_version().gen() <= 4 { 95 } else { 100 }, rng) {
-        return false;
-    }
-
-    let damage_type = Type::Normal;
-    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
+fn tackle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
     let power = match game_version().gen() {
         1..=4 => 35,
         5..=6 => 50,
         _ => 40
     };
-    std_damage(state, user_id, target_id, damage_type, category, power, 0, rng).0
+    std_damage(state, user_id, target_id, move_.type_, category, power, 0, rng).0
 }
 
 /// Returns whether the battle has ended.
-fn vine_whip(state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
-    if !std_accuracy_check(state, user_id, target_id, 100, rng) {
-        return false;
-    }
-
-    let damage_type = Type::Grass;
-    let category = if game_version().gen() <= 3 { damage_type.category() } else { MoveCategory::Physical };
+fn vine_whip(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+    let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
     let power = if game_version().gen() <= 5 { 35 } else { 45 };
-    std_damage(state, user_id, target_id, damage_type, category, power, 0, rng).0
+    std_damage(state, user_id, target_id, move_.type_, category, power, 0, rng).0
 }
