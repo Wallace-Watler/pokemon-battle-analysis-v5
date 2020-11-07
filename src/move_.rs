@@ -10,6 +10,7 @@ use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, S
 use crate::state::State;
 use crate::species::Species;
 use json::JsonValue;
+use json::number::Number;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MoveCategory {
@@ -226,9 +227,45 @@ impl Action {
                             };
 
                             if accuracy_check {
-                                if (move_.effect)(move_, state, action_queue, *user_id, target_id, rng) {
-                                    return true;
+                                /*
+                                let mut effect_result = None
+                                for effect in move_.effects {
+                                    effect_result = match effect {
+                                        ... // Code for each effect
+                                        // E.g. MoveEffect::RecoilByDamageDealt => {
+                                            match effect_result {
+                                                EffectResult::Hit(damage_dealt) => recoilByDamageDealt(damage_dealt),
+                                                _ => panic!()
+                                            }
+                                        }
+                                    }
                                 }
+                                */
+                                /*let mut effect_result = EffectResult::None;
+                                for effect in move_.effects {
+                                    effect_result = match effect {
+                                        MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
+
+                                        },
+                                        MoveEffect::IncTargetStatStage(stat_index, amount) => {
+
+                                        },
+                                        MoveEffect::LeechSeed => {
+
+                                        },
+                                        MoveEffect::Struggle => {
+
+                                        }
+                                    }
+                                    if effect_result == EffectResult::BattleEnded {
+                                        return true;
+                                    }
+                                }*/
+
+                                // TODO: Replace with the thing in todo.txt
+                                //if (move_.effect)(move_, state, action_queue, *user_id, target_id, rng) {
+                                //    return true;
+                                //}
                             } else if cfg!(feature = "print-battle") {
                                 let target_name = Species::name(state.pokemon_by_id(target_id).species);
                                 state.display_text.push(format!("{} avoided the attack!", target_name));
@@ -261,7 +298,8 @@ pub struct Move {
     max_pp: u8,
     priority_stage: i8,
     sound_based: bool,
-    effect: fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool
+    effect: fn(&Move, &mut State, &[&Action], u8, u8, &mut StdRng) -> bool,
+    effects: Vec<MoveEffect>
 }
 
 impl Move {
@@ -306,6 +344,24 @@ impl Debug for Move {
 }
 
 static mut MOVES: Vec<Move> = vec![];
+
+enum MoveEffect {
+    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
+    StdDamage(Type, u8, u8, u8),
+    /// (stat_index: StatIndex, amount: i8)
+    IncTargetStatStage(StatIndex, i8),
+    LeechSeed,
+    Struggle
+}
+
+enum EffectResult {
+    /// (damage_dealt: i16)
+    Hit(i16),
+    Fail,
+    BattleEnded,
+    /// No effects have been done yet
+    None
+}
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and before the species are initialized.
@@ -363,8 +419,80 @@ pub fn initialize_moves() {
                                         .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid boolean", key, member_pretty))
                                 };
 
-                                let name = extract_string("name");
                                 let type_ = extract_type("type");
+
+                                let mut effects = Vec::new();
+                                match object.get("effects") {
+                                    Some(value) => {
+                                        match value {
+                                            JsonValue::Array(array2) => {
+                                                for member2 in array2 {
+                                                    let member_pretty2 = member2.pretty(4);
+                                                    match member2 {
+                                                        JsonValue::Object(object2) => {
+                                                            let extract_string2 = |key: &str| -> &str {
+                                                                object2.get(key)
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
+                                                                    .as_str()
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a String", key, member_pretty2))
+                                                            };
+                                                            let extract_u82 = |key: &str| -> u8 {
+                                                                object2.get(key)
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
+                                                                    .as_u8()
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty2))
+                                                            };
+                                                            let extract_u8_def = |key: &str, default: u8| -> u8 {
+                                                                object2.get(key)
+                                                                    .unwrap_or(&JsonValue::Number(Number::from(default)))
+                                                                    .as_u8()
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty2))
+                                                            };
+                                                            let extract_i82 = |key: &str| -> i8 {
+                                                                object2.get(key)
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
+                                                                    .as_i8()
+                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid i8 number", key, member_pretty2))
+                                                            };
+
+                                                            let move_effect;
+                                                            let name = extract_string2("name");
+                                                            match name {
+                                                                "StdDamage" => {
+                                                                    move_effect = MoveEffect::StdDamage(
+                                                                        if member2.has_key("damage_type") {
+                                                                            Type::by_name(extract_string2("damage_type"))
+                                                                                .unwrap_or_else(|_| panic!("Invalid moves JSON: 'damage_type' in object\n{}\nis not a valid type", member_pretty2))
+                                                                        } else { type_ },
+                                                                        extract_u82("power"),
+                                                                        extract_u8_def("critical_hit_stage_bonus", 0),
+                                                                        extract_u8_def("recoil_divisor", 0)
+                                                                    );
+                                                                },
+                                                                "IncTargetStatStage" => {
+                                                                    move_effect = MoveEffect::IncTargetStatStage(
+                                                                        StatIndex::by_name(extract_string2("stat_index"))
+                                                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: 'stat_index' in object\n{}\nis not a valid stat index", member_pretty2)),
+                                                                        extract_i82("amount")
+                                                                    );
+                                                                },
+                                                                "LeechSeed" => move_effect = MoveEffect::LeechSeed,
+                                                                "Struggle" => move_effect = MoveEffect::Struggle,
+                                                                _ => panic!("Invalid moves JSON: '{}' in effect\n{}\nis not a valid move effect", name, member_pretty2)
+                                                            }
+                                                            effects.push(move_effect);
+                                                        },
+                                                        _ => panic!("Invalid moves JSON: member\n{}\nin object\n{}\nis not an object", member_pretty2, member_pretty)
+                                                    }
+                                                }
+                                            },
+                                            _ => panic!("Invalid moves JSON: 'effects' in object\n{}\nis not an array", member_pretty)
+                                        }
+                                    },
+                                    None => panic!("Invalid moves JSON: object\n{}\ndoes not have an 'effects' field", member_pretty)
+                                }
+
+                                let name = extract_string("name");
                                 let category = extract_category("category");
                                 unsafe {
                                     MOVES.push(Move {
@@ -377,7 +505,8 @@ pub fn initialize_moves() {
                                         priority_stage: extract_i8("priority_stage"),
                                         sound_based: extract_bool("sound_based"),
                                         effect: move_function_by_name(name)
-                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid move", name, member_pretty))
+                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid move", name, member_pretty)),
+                                        effects
                                     });
                                 }
                             },
@@ -434,8 +563,8 @@ fn std_base_damage(power: u32, calculated_atk: u32, calculated_def: u32, offensi
     (42 * power * (calculated_atk as f64 * attack_multiplier) as u32 / (calculated_def as f64 * defense_multiplier) as u32) / 50 + 2
 }
 
-/// Returns whether the battle has ended and the damage dealt to the target.
-fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u32, critical_hit_stage_bonus: usize, rng: &mut StdRng) -> (bool, i16) {
+/// Returns whether the battle has ended.
+fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u32, critical_hit_stage_bonus: usize, recoil_divisor: u8, rng: &mut StdRng) -> bool {
     let target_first_type;
     let target_second_type;
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -465,7 +594,7 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
             let target_name = Species::name(state.pokemon_by_id(target_id).species);
             state.display_text.push(format!("It doesn't affect the opponent's {}...", target_name));
         }
-        return (false, 0);
+        return false;
     }
 
     let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
@@ -512,7 +641,23 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
     modified_damage = modified_damage.max(1.0);
 
     let damage_dealt = modified_damage.round() as i16;
-    (pokemon::apply_damage(state, target_id, damage_dealt), damage_dealt)
+    pokemon::apply_damage(state, target_id, damage_dealt) || recoil(state, user_id, damage_dealt, recoil_divisor)
+}
+
+fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8) -> bool {
+    if recoil_divisor > 0 {
+        let recoil_damage = if game_version().gen() <= 4 {
+            max(damage_dealt / recoil_divisor as i16, 1)
+        } else {
+            max((damage_dealt as f64 / recoil_divisor as f64).round() as i16, 1)
+        };
+        if cfg!(feature = "print-battle") {
+            let user_display_text = format!("{}", state.pokemon_by_id(user_id));
+            state.display_text.push(format!("{} took recoil damage!", user_display_text));
+        }
+        return pokemon::apply_damage(state, user_id, recoil_damage);
+    }
+    false
 }
 
 /// Returns whether the battle has ended.
@@ -552,20 +697,15 @@ fn leech_seed(move_: &Move, state: &mut State, _action_queue: &[&Action], user_i
 /// Returns whether the battle has ended.
 fn struggle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
-    let (battle_ended, damage_dealt) = std_damage(state, user_id, target_id, move_.type_, category, 50, 0, rng);
-    if battle_ended { return true; }
-
-    let user_max_hp = state.pokemon_by_id(user_id).max_hp;
-    let recoil_damage = match game_version().gen() {
-        1..=3 => max(damage_dealt / 4, 1) as i16,
-        4 => max(user_max_hp / 4, 1) as i16,
-        _ => max((user_max_hp as f64 / 4.0).round() as i16, 1)
-    };
-    if cfg!(feature = "print-battle") {
-        let user_display_text = format!("{}", state.pokemon_by_id(user_id));
-        state.display_text.push(format!("{} took recoil damage!", user_display_text));
+    match game_version().gen() {
+        1..=3 => {
+            std_damage(state, user_id, target_id, move_.type_, category, 50, 0, 4, rng)
+        },
+        _ => {
+            std_damage(state, user_id, target_id, move_.type_, category, 50, 0, 0, rng)
+                || recoil(state, user_id, state.pokemon_by_id(user_id).max_hp as i16, 4)
+        }
     }
-    pokemon::apply_damage(state, user_id, recoil_damage)
 }
 
 /// Returns whether the battle has ended.
@@ -576,12 +716,12 @@ fn tackle(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u
         5..=6 => 50,
         _ => 40
     };
-    std_damage(state, user_id, target_id, move_.type_, category, power, 0, rng).0
+    std_damage(state, user_id, target_id, move_.type_, category, power, 0, 0, rng)
 }
 
 /// Returns whether the battle has ended.
 fn vine_whip(move_: &Move, state: &mut State, _action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
     let category = if game_version().gen() <= 3 { move_.type_.category() } else { move_.category };
     let power = if game_version().gen() <= 5 { 35 } else { 45 };
-    std_damage(state, user_id, target_id, move_.type_, category, power, 0, rng).0
+    std_damage(state, user_id, target_id, move_.type_, category, power, 0, 0, rng)
 }

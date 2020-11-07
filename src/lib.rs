@@ -456,6 +456,21 @@ pub enum StatIndex {
 }
 
 impl StatIndex {
+    fn by_name(name: &str) -> Result<StatIndex, String> {
+        let n = name.to_ascii_lowercase();
+        match n.as_str() {
+            "hp"    => Ok(StatIndex::Hp),
+            "atk"   => Ok(StatIndex::Atk),
+            "def"   => Ok(StatIndex::Def),
+            "spatk" => Ok(StatIndex::SpAtk),
+            "spdef" => Ok(StatIndex::SpDef),
+            "spd"   => Ok(StatIndex::Spd),
+            "acc"   => Ok(StatIndex::Acc),
+            "eva"   => Ok(StatIndex::Eva),
+            _ => Err(format!("Invalid stat index '{}'", name))
+        }
+    }
+
     const fn name(&self) -> &'static str {
         match self {
             StatIndex::Hp => "HP",
