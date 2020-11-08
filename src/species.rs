@@ -118,96 +118,65 @@ pub fn initialize_species() {
         json::Result::Ok(parsed) => {
             match parsed {
                 JsonValue::Array(array) => {
-                    for member in array {
-                        let member_pretty = member.pretty(4);
-                        match member {
-                            JsonValue::Object(object) => {
-                                let extract_string = |key: &str| -> &str {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_str()
-                                        .unwrap_or_else(|| panic!("Invalid species JSON: '{}' in object\n{}\nis not a String", key, member_pretty))
-                                };
-                                let extract_type = |key: &str| -> Type {
-                                    let string = extract_string(key);
-                                    Type::by_name(string)
-                                        .unwrap_or_else(|_| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
-                                };
-                                let extract_ability = |key: &str| -> AbilityID {
-                                    let string = extract_string(key);
-                                    Ability::id_by_name(string)
-                                        .unwrap_or_else(|_| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
-                                };
-                                let extract_u16 = |key: &str| -> u16 {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid species JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_u16()
-                                        .unwrap_or_else(|| panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid u16 number", key, member_pretty))
-                                };
-                                let extract_bool = |key: &str| -> bool {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_bool()
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid boolean", key, member_pretty))
-                                };
+                    let extract_string = |json_value: &mut JsonValue, key: &str| -> String {
+                        json_value.remove(key).as_str()
+                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid string field '{}'", json_value.pretty(4), key))
+                            .to_owned()
+                    };
+                    let extract_type = |json_value: &mut JsonValue, key: &str| -> Type {
+                        let string = extract_string(json_value, key);
+                        Type::by_name(string.as_str())
+                            .unwrap_or_else(|_| panic!("Invalid species.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_ability = |json_value: &mut JsonValue, key: &str| -> AbilityID {
+                        let string = extract_string(json_value, key);
+                        Ability::id_by_name(string.as_str())
+                            .unwrap_or_else(|_| panic!("Invalid species.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_u16 = |json_value: &mut JsonValue, key: &str| -> u16 {
+                        json_value.remove(key).as_u16()
+                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid u16 field '{}'", json_value.pretty(4), key))
+                    };
+                    let extract_bool = |json_value: &mut JsonValue, key: &str| -> bool {
+                        json_value.remove(key).as_bool()
+                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid boolean field '{}'", json_value.pretty(4), key))
+                    };
 
-                                let mut base_stats: [u8; 6] = [0, 0, 0, 0, 0, 0];
-                                match object.get("base_stats") {
-                                    Some(value) => {
-                                        match value {
-                                            JsonValue::Array(array) => {
-                                                if array.len() != 6 { panic!(format!("Invalid species JSON: 'base_stats' in object\n{}\ndoes not contain 6 numbers", member_pretty)) }
-                                                for (i, member) in array.iter().enumerate() {
-                                                    base_stats[i] = member.as_u8()
-                                                        .unwrap_or_else(|| panic!("Invalid species JSON: 'base_stats' in object\n{}\ncontains invalid u8 numbers", member_pretty))
-                                                }
-                                            },
-                                            _ => panic!("Invalid species JSON: 'base_stats' in object\n{}\nis not an array", member_pretty)
-                                        }
-                                    },
-                                    None => panic!("Invalid species JSON: object\n{}\ndoes not have a 'base_stats' field", member_pretty)
-                                }
+                    for mut json_species in array {
+                        let mut base_stats: [u8; 6] = [0, 0, 0, 0, 0, 0];
+                        let json_base_stats = json_species.remove("base_stats");
+                        let json_base_stats_members = json_base_stats.members();
+                        if json_base_stats_members.len() != 6 { panic!("Invalid species.json: 'base_stats' in member\n{}\ndoes not contain 6 numbers", json_species.pretty(4)) }
+                        for (i, json_base_stat) in json_base_stats_members.enumerate() {
+                            base_stats[i] = json_base_stat.as_u8()
+                                .unwrap_or_else(|| panic!("Invalid species.json: 'base_stats' in object\n{}\ncontains invalid u8 numbers", json_species.pretty(4)))
+                        }
 
-                                let mut move_pool = Vec::new();
-                                match object.get("move_pool") {
-                                    Some(value) => {
-                                        match value {
-                                            JsonValue::Array(array) => {
-                                                for member in array {
-                                                    match member.as_str() {
-                                                        Some(string) => {
-                                                            match Move::id_by_name(string) {
-                                                                Ok(move_) => move_pool.push(move_),
-                                                                Err(_) => panic!("Invalid species JSON: '{}' in object\n{}\nis not a valid move", string, member_pretty)
-                                                            }
-                                                        },
-                                                        None => panic!("Invalid species JSON: 'move_pool' in object\n{}\ncontains invalid strings", member_pretty)
-                                                    }
-                                                }
-                                            },
-                                            _ => panic!("Invalid species JSON: 'move_pool' in object\n{}\nis not an array", member_pretty)
-                                        }
-                                    },
-                                    None => panic!("Invalid species JSON: object\n{}\ndoes not have a 'move_pool' field", member_pretty)
-                                }
+                        let mut move_pool = Vec::new();
+                        let json_moves = json_species.remove("move_pool");
+                        let json_moves_members = json_moves.members();
+                        for json_move in json_moves_members {
+                            let move_name = json_move.as_str().unwrap_or_else(|| panic!("Invalid species.json: 'move_pool' in member\n{}\ncontains invalid strings", json_species.pretty(4)));
+                            match Move::id_by_name(move_name) {
+                                Ok(move_) => move_pool.push(move_),
+                                Err(_) => panic!("Invalid species.json: '{}' in member\n{}\nis not a valid move", move_name, json_move)
+                            }
+                        }
 
-                                unsafe {
-                                    SPECIES.push(Species {
-                                        name: extract_string("name").to_owned(),
-                                        type1: extract_type("type1"),
-                                        type2: extract_type("type2"),
-                                        ability1: extract_ability("ability1"),
-                                        ability2: extract_ability("ability2"),
-                                        base_stats,
-                                        weight: extract_u16("weight"),
-                                        male_chance: extract_u16("male_chance"),
-                                        female_chance: extract_u16("female_chance"),
-                                        allow_duplicates: extract_bool("allow_duplicates"),
-                                        move_pool
-                                    });
-                                }
-                            },
-                            _ => panic!("Invalid species JSON: member\n{}\nis not an object", member_pretty)
+                        unsafe {
+                            SPECIES.push(Species {
+                                name: extract_string(&mut json_species, "name").to_owned(),
+                                type1: extract_type(&mut json_species, "type1"),
+                                type2: extract_type(&mut json_species, "type2"),
+                                ability1: extract_ability(&mut json_species, "ability1"),
+                                ability2: extract_ability(&mut json_species, "ability2"),
+                                base_stats,
+                                weight: extract_u16(&mut json_species, "weight"),
+                                male_chance: extract_u16(&mut json_species, "male_chance"),
+                                female_chance: extract_u16(&mut json_species, "female_chance"),
+                                allow_duplicates: extract_bool(&mut json_species, "allow_duplicates"),
+                                move_pool
+                            });
                         }
                     }
                 },

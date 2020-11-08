@@ -10,7 +10,6 @@ use crate::{Ability, FieldPosition, game_version, MajorStatusAilment, pokemon, S
 use crate::state::State;
 use crate::species::Species;
 use json::JsonValue;
-use json::number::Number;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MoveCategory {
@@ -311,7 +310,7 @@ impl Debug for Move {
     }
 }
 
-static mut MOVES: Vec<Move> = vec![];
+static mut MOVES: Vec<Move> = Vec::new();
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and before the species are initialized.
@@ -325,144 +324,96 @@ pub fn initialize_moves() {
         json::Result::Ok(parsed) => {
             match parsed {
                 JsonValue::Array(array) => {
-                    for member in array {
-                        let member_pretty = member.pretty(4);
-                        match member {
-                            JsonValue::Object(object) => {
-                                let extract_string = |key: &str| -> &str {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_str()
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a String", key, member_pretty))
-                                };
-                                let extract_type = |key: &str| -> Type {
-                                    let string = extract_string(key);
-                                    Type::by_name(string)
-                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
-                                };
-                                let extract_category = |key: &str| -> MoveCategory {
-                                    let string = extract_string(key);
-                                    MoveCategory::by_name(string)
-                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
-                                };
-                                let extract_targeting = |key: &str| -> MoveTargeting {
-                                    let string = extract_string(key);
-                                    MoveTargeting::by_name(string)
-                                        .unwrap_or_else(|_| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid {}", string, member_pretty, key))
-                                };
-                                let extract_u8 = |key: &str| -> u8 {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_u8()
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty))
-                                };
-                                let extract_i8 = |key: &str| -> i8 {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_i8()
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid i8 number", key, member_pretty))
-                                };
-                                let extract_bool = |key: &str| -> bool {
-                                    object.get(key)
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty, key))
-                                        .as_bool()
-                                        .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid boolean", key, member_pretty))
-                                };
+                    let extract_string = |json_value: &mut JsonValue, key: &str| -> String {
+                        json_value.remove(key).as_str()
+                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid string field '{}'", json_value.pretty(4), key))
+                            .to_owned()
+                    };
+                    let extract_type = |json_value: &mut JsonValue, key: &str| -> Type {
+                        let string = extract_string(json_value, key);
+                        Type::by_name(string.as_str())
+                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_type_def = |json_value: &mut JsonValue, key: &str, default: Type| -> Type {
+                        if !json_value.has_key(key) { return default; }
+                        let string = extract_string(json_value, key);
+                        Type::by_name(string.as_str()).unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in member\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_category = |json_value: &mut JsonValue, key: &str| -> MoveCategory {
+                        let string = extract_string(json_value, key);
+                        MoveCategory::by_name(string.as_str())
+                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_targeting = |json_value: &mut JsonValue, key: &str| -> MoveTargeting {
+                        let string = extract_string(json_value, key);
+                        MoveTargeting::by_name(string.as_str())
+                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
+                    };
+                    let extract_u8 = |json_value: &mut JsonValue, key: &str| -> u8 {
+                        json_value.remove(key).as_u8()
+                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid u8 field '{}'", json_value.pretty(4), key))
+                    };
+                    let extract_u8_def = |json_value: &mut JsonValue, key: &str, default: u8| -> u8 {
+                        if !json_value.has_key(key) { return default; }
+                        json_value.remove(key).as_u8()
+                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\nhas an invalid u8 field '{}'", json_value.pretty(4), key))
+                    };
+                    let extract_i8 = |json_value: &mut JsonValue, key: &str| -> i8 {
+                        json_value.remove(key).as_i8()
+                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid i8 field '{}'", json_value.pretty(4), key))
+                    };
+                    let extract_bool = |json_value: &mut JsonValue, key: &str| -> bool {
+                        json_value.remove(key).as_bool()
+                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid boolean field '{}'", json_value.pretty(4), key))
+                    };
 
-                                let type_ = extract_type("type");
+                    for mut json_move in array {
+                        let type_ = extract_type(&mut json_move, "type");
+                        let mut effects = Vec::new();
 
-                                let mut effects = Vec::new();
-                                match object.get("effects") {
-                                    Some(value) => {
-                                        match value {
-                                            JsonValue::Array(array2) => {
-                                                for member2 in array2 {
-                                                    let member_pretty2 = member2.pretty(4);
-                                                    match member2 {
-                                                        JsonValue::Object(object2) => {
-                                                            let extract_string2 = |key: &str| -> &str {
-                                                                object2.get(key)
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
-                                                                    .as_str()
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a String", key, member_pretty2))
-                                                            };
-                                                            let extract_u82 = |key: &str| -> u8 {
-                                                                object2.get(key)
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
-                                                                    .as_u8()
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty2))
-                                                            };
-                                                            let extract_u8_def = |key: &str, default: u8| -> u8 {
-                                                                object2.get(key)
-                                                                    .unwrap_or(&JsonValue::Number(Number::from(default)))
-                                                                    .as_u8()
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid u8 number", key, member_pretty2))
-                                                            };
-                                                            let extract_i82 = |key: &str| -> i8 {
-                                                                object2.get(key)
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: object\n{}\ndoes not have a '{}' field", member_pretty2, key))
-                                                                    .as_i8()
-                                                                    .unwrap_or_else(|| panic!("Invalid moves JSON: '{}' in object\n{}\nis not a valid i8 number", key, member_pretty2))
-                                                            };
+                        for mut json_effect in json_move.remove("effects").members_mut() {
+                            let effect;
+                            let name = extract_string(&mut json_effect, "name");
+                            match name.as_str() {
+                                "StdDamage" => {
+                                    effect = MoveEffect::StdDamage(
+                                        extract_type_def(&mut json_effect, "damage_type", type_),
+                                        extract_u8(&mut json_effect, "power"),
+                                        extract_u8_def(&mut json_effect, "critical_hit_stage_bonus", 0),
+                                        extract_u8_def(&mut json_effect, "recoil_divisor", 0)
+                                    );
+                                },
+                                "IncTargetStatStage" => {
+                                    effect = MoveEffect::IncTargetStatStage(
+                                        StatIndex::by_name(extract_string(&mut json_effect, "stat_index").as_str())
+                                            .unwrap_or_else(|_| panic!("Invalid moves.json: 'stat_index' in object\n{}\nis not a valid stat index", json_effect.pretty(4))),
+                                        extract_i8(&mut json_effect, "amount")
+                                    );
+                                },
+                                "LeechSeed" => effect = MoveEffect::LeechSeed,
+                                "Struggle" => effect = MoveEffect::Struggle,
+                                _ => panic!("Invalid moves.json: '{}' in move effect\n{}\nis not a valid move effect", name, json_effect.pretty(4))
+                            }
+                            effects.push(effect);
+                        }
 
-                                                            let move_effect;
-                                                            let name = extract_string2("name");
-                                                            match name {
-                                                                "StdDamage" => {
-                                                                    move_effect = MoveEffect::StdDamage(
-                                                                        if member2.has_key("damage_type") {
-                                                                            Type::by_name(extract_string2("damage_type"))
-                                                                                .unwrap_or_else(|_| panic!("Invalid moves JSON: 'damage_type' in object\n{}\nis not a valid type", member_pretty2))
-                                                                        } else { type_ },
-                                                                        extract_u82("power"),
-                                                                        extract_u8_def("critical_hit_stage_bonus", 0),
-                                                                        extract_u8_def("recoil_divisor", 0)
-                                                                    );
-                                                                },
-                                                                "IncTargetStatStage" => {
-                                                                    move_effect = MoveEffect::IncTargetStatStage(
-                                                                        StatIndex::by_name(extract_string2("stat_index"))
-                                                                            .unwrap_or_else(|_| panic!("Invalid moves JSON: 'stat_index' in object\n{}\nis not a valid stat index", member_pretty2)),
-                                                                        extract_i82("amount")
-                                                                    );
-                                                                },
-                                                                "LeechSeed" => move_effect = MoveEffect::LeechSeed,
-                                                                "Struggle" => move_effect = MoveEffect::Struggle,
-                                                                _ => panic!("Invalid moves JSON: '{}' in effect\n{}\nis not a valid move effect", name, member_pretty2)
-                                                            }
-                                                            effects.push(move_effect);
-                                                        },
-                                                        _ => panic!("Invalid moves JSON: member\n{}\nin object\n{}\nis not an object", member_pretty2, member_pretty)
-                                                    }
-                                                }
-                                            },
-                                            _ => panic!("Invalid moves JSON: 'effects' in object\n{}\nis not an array", member_pretty)
-                                        }
-                                    },
-                                    None => panic!("Invalid moves JSON: object\n{}\ndoes not have an 'effects' field", member_pretty)
-                                }
-
-                                let name = extract_string("name");
-                                let category = extract_category("category");
-                                unsafe {
-                                    MOVES.push(Move {
-                                        name: name.to_owned(),
-                                        type_,
-                                        category: if game_version().gen() <= 3 && category != MoveCategory::Status { type_.category() } else { category },
-                                        accuracy: extract_u8("accuracy"),
-                                        targeting: extract_targeting("targeting"),
-                                        max_pp: extract_u8("max_pp"),
-                                        priority_stage: extract_i8("priority_stage"),
-                                        sound_based: extract_bool("sound_based"),
-                                        effects
-                                    });
-                                }
-                            },
-                            _ => panic!("Invalid moves JSON: member\n{}\nis not an object", member_pretty)
+                        let category = extract_category(&mut json_move, "category");
+                        unsafe {
+                            MOVES.push(Move {
+                                name: extract_string(&mut json_move, "name").to_owned(),
+                                type_,
+                                category: if game_version().gen() <= 3 && category != MoveCategory::Status { type_.category() } else { category },
+                                accuracy: extract_u8(&mut json_move, "accuracy"),
+                                targeting: extract_targeting(&mut json_move, "targeting"),
+                                max_pp: extract_u8(&mut json_move, "max_pp"),
+                                priority_stage: extract_i8(&mut json_move, "priority_stage"),
+                                sound_based: extract_bool(&mut json_move, "sound_based"),
+                                effects
+                            });
                         }
                     }
                 },
-                _ => panic!("Invalid moves JSON: not an array of objects")
+                _ => panic!("Invalid moves.json: not an array of objects")
             }
         },
         json::Result::Err(error) => {
