@@ -38,18 +38,8 @@ fn main() {
         bulbasaur_build.clone(),
         bulbasaur_build.clone(),
         bulbasaur_build.clone(),
-        bulbasaur_build.clone()
+        bulbasaur_build
     ];
 
-    //state::run_battle(bulbasaur_builds, &mut rng);
-
-    let mut writer = csv::Writer::from_path("test_ser.csv").unwrap();
-    writer.serialize(bulbasaur_build).unwrap();
-    writer.flush().unwrap();
-
-    let mut reader = csv::Reader::from_path("test_ser.csv").unwrap();
-    for record in reader.deserialize() {
-        let pokemon_build: PokemonBuild = record.unwrap();
-        println!("{:?}", pokemon_build);
-    }
+    state::run_battle(bulbasaur_builds, &mut rng);
 }

@@ -5,6 +5,7 @@ use crate::species::Species;
 use crate::battle_ai::state::State;
 use rand::prelude::StdRng;
 use rand::Rng;
+use serde::Deserialize;
 use std::cmp::{min, max};
 
 /// An action selection that will be queued and executed during a turn.
@@ -149,6 +150,7 @@ impl Action {
     }
 }
 
+#[derive(Deserialize)]
 pub enum MoveEffect {
     /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
     StdDamage(Type, u8, u8, u8),

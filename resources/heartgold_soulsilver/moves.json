@@ -9,11 +9,7 @@
         "priority_stage": 0,
         "sound_based": true,
         "effects": [
-            {
-                "name": "IncTargetStatStage",
-                "stat_index": "Atk",
-                "amount": -1
-            }
+            { "IncTargetStatStage": ["Atk", -1] }
         ]
     },
     {
@@ -26,14 +22,12 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            {
-                "name": "LeechSeed"
-            }
+            "LeechSeed"
         ]
     },
     {
         "name": "Struggle",
-        "type": "None",
+        "type": "Normal",
         "category": "Physical",
         "accuracy": 0,
         "targeting": "RandomOpponent",
@@ -41,9 +35,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            {
-                "name": "Struggle"
-            }
+            "Struggle"
         ]
     },
     {
@@ -56,10 +48,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            {
-                "name": "StdDamage",
-                "power": 35
-            }
+            { "StdDamage": ["Normal", 35, 0, 0] }
         ]
     },
     {
@@ -72,10 +61,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            {
-                "name": "StdDamage",
-                "power": 35
-            }
+            { "StdDamage": ["Grass", 35, 0, 0] }
         ]
     }
 ]

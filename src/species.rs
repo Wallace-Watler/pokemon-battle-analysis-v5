@@ -1,15 +1,16 @@
-use json::JsonValue;
-use rand::prelude::StdRng;
-use rand::Rng;
-use std::fs;
-use std::cmp::min;
-use std::process;
 use crate::{Gender, Ability, AbilityID, Type, StatIndex, game_version};
 use crate::move_::{MoveID, Move};
+use rand::prelude::StdRng;
+use rand::Rng;
+use serde::Deserialize;
+use serde::export::TryFrom;
+use std::fs;
+use std::cmp::min;
 
 pub type SpeciesID = u8;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(try_from = "SpeciesSerde")]
 pub struct Species {
     /// True if multiple Pokemon of this species can be obtained in-game.
     name: String,
@@ -37,7 +38,7 @@ impl Species {
                 }
             }
         }
-        Err(format!("Invalid species '{}'.", name))
+        Err(format!("invalid species '{}'.", name))
     }
 
     fn by_id(species_id: SpeciesID) -> &'static Species {
@@ -104,7 +105,49 @@ impl Species {
     }
 }
 
+impl TryFrom<SpeciesSerde<'_>> for Species {
+    type Error = String;
+
+    fn try_from(species_serde: SpeciesSerde) -> Result<Self, Self::Error> {
+        let mut move_pool = Vec::new();
+        for move_name in species_serde.move_pool {
+            move_pool.push(Move::id_by_name(move_name)?);
+        }
+
+        Ok(
+            Species {
+                name: species_serde.name.to_owned(),
+                type1: species_serde.type1,
+                type2: species_serde.type2,
+                ability1: Ability::id_by_name(species_serde.ability1)?,
+                ability2: Ability::id_by_name(species_serde.ability2)?,
+                base_stats: species_serde.base_stats,
+                weight: species_serde.weight,
+                male_chance: species_serde.male_chance,
+                female_chance: species_serde.female_chance,
+                allow_duplicates: species_serde.allow_duplicates,
+                move_pool
+            }
+        )
+    }
+}
+
 static mut SPECIES: Vec<Species> = Vec::new();
+
+#[derive(Deserialize)]
+struct SpeciesSerde<'d> {
+    name: &'d str,
+    type1: Type,
+    type2: Type,
+    ability1: &'d str,
+    ability2: &'d str,
+    base_stats: [u8; 6],
+    weight: u16,
+    male_chance: u16,
+    female_chance: u16,
+    allow_duplicates: bool,
+    move_pool: Vec<&'d str>
+}
 
 /// # Safety
 /// Should be called after the game version has been set from the program input and the moves have been initialized.
@@ -112,80 +155,10 @@ pub fn initialize_species() {
     let mut path = String::from("resources/");
     path.push_str(game_version().name());
     path.push_str("/species.json");
-    let species_json = fs::read_to_string(path.as_str()).unwrap_or_else(|_| panic!("Failed to read {}.", path));
-
-    match json::parse(species_json.as_str()) {
-        json::Result::Ok(parsed) => {
-            match parsed {
-                JsonValue::Array(array) => {
-                    let extract_string = |json_value: &mut JsonValue, key: &str| -> String {
-                        json_value.remove(key).as_str()
-                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid string field '{}'", json_value.pretty(4), key))
-                            .to_owned()
-                    };
-                    let extract_type = |json_value: &mut JsonValue, key: &str| -> Type {
-                        let string = extract_string(json_value, key);
-                        Type::by_name(string.as_str())
-                            .unwrap_or_else(|_| panic!("Invalid species.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_ability = |json_value: &mut JsonValue, key: &str| -> AbilityID {
-                        let string = extract_string(json_value, key);
-                        Ability::id_by_name(string.as_str())
-                            .unwrap_or_else(|_| panic!("Invalid species.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_u16 = |json_value: &mut JsonValue, key: &str| -> u16 {
-                        json_value.remove(key).as_u16()
-                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid u16 field '{}'", json_value.pretty(4), key))
-                    };
-                    let extract_bool = |json_value: &mut JsonValue, key: &str| -> bool {
-                        json_value.remove(key).as_bool()
-                            .unwrap_or_else(|| panic!("Invalid species.json: member\n{}\ndoes not have a valid boolean field '{}'", json_value.pretty(4), key))
-                    };
-
-                    for mut json_species in array {
-                        let mut base_stats: [u8; 6] = [0, 0, 0, 0, 0, 0];
-                        let json_base_stats = json_species.remove("base_stats");
-                        let json_base_stats_members = json_base_stats.members();
-                        if json_base_stats_members.len() != 6 { panic!("Invalid species.json: 'base_stats' in member\n{}\ndoes not contain 6 numbers", json_species.pretty(4)) }
-                        for (i, json_base_stat) in json_base_stats_members.enumerate() {
-                            base_stats[i] = json_base_stat.as_u8()
-                                .unwrap_or_else(|| panic!("Invalid species.json: 'base_stats' in object\n{}\ncontains invalid u8 numbers", json_species.pretty(4)))
-                        }
-
-                        let mut move_pool = Vec::new();
-                        let json_moves = json_species.remove("move_pool");
-                        let json_moves_members = json_moves.members();
-                        for json_move in json_moves_members {
-                            let move_name = json_move.as_str().unwrap_or_else(|| panic!("Invalid species.json: 'move_pool' in member\n{}\ncontains invalid strings", json_species.pretty(4)));
-                            match Move::id_by_name(move_name) {
-                                Ok(move_) => move_pool.push(move_),
-                                Err(_) => panic!("Invalid species.json: '{}' in member\n{}\nis not a valid move", move_name, json_move)
-                            }
-                        }
-
-                        unsafe {
-                            SPECIES.push(Species {
-                                name: extract_string(&mut json_species, "name").to_owned(),
-                                type1: extract_type(&mut json_species, "type1"),
-                                type2: extract_type(&mut json_species, "type2"),
-                                ability1: extract_ability(&mut json_species, "ability1"),
-                                ability2: extract_ability(&mut json_species, "ability2"),
-                                base_stats,
-                                weight: extract_u16(&mut json_species, "weight"),
-                                male_chance: extract_u16(&mut json_species, "male_chance"),
-                                female_chance: extract_u16(&mut json_species, "female_chance"),
-                                allow_duplicates: extract_bool(&mut json_species, "allow_duplicates"),
-                                move_pool
-                            });
-                        }
-                    }
-                },
-                _ => panic!("Invalid species JSON: not an array of objects")
-            }
-        },
-        json::Result::Err(error) => {
-            println!("{}", error);
-            process::exit(1);
-        }
+    let species_json = fs::read_to_string(path.as_str())
+        .unwrap_or_else(|_| panic!("Failed to read {}.", path));
+    unsafe {
+        SPECIES = serde_json::from_str(species_json.as_str())
+            .unwrap_or_else(|err| panic!("Error parsing species.json: {}", err));
     }
 }

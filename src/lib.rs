@@ -88,32 +88,6 @@ pub enum Type {
 }
 
 impl Type {
-    fn by_name(name: &str) -> Result<Type, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "none"     => Ok(Type::None),
-            "normal"   => Ok(Type::Normal),
-            "fighting" => Ok(Type::Fighting),
-            "flying"   => Ok(Type::Flying),
-            "poison"   => Ok(Type::Poison),
-            "ground"   => Ok(Type::Ground),
-            "rock"     => Ok(Type::Rock),
-            "bug"      => Ok(Type::Bug),
-            "ghost"    => Ok(Type::Ghost),
-            "steel"    => Ok(Type::Steel),
-            "fire"     => Ok(Type::Fire),
-            "water"    => Ok(Type::Water),
-            "grass"    => Ok(Type::Grass),
-            "electric" => Ok(Type::Electric),
-            "psychic"  => Ok(Type::Psychic),
-            "ice"      => Ok(Type::Ice),
-            "dragon"   => Ok(Type::Dragon),
-            "dark"     => Ok(Type::Dark),
-            "fairy"    => Ok(Type::Fairy),
-            _ => Err(format!("Invalid type '{}'", name))
-        }
-    }
-
     const fn category(&self) -> MoveCategory {
         match self {
             Type::None | Type::Normal | Type::Fighting | Type::Flying | Type::Poison | Type::Ground | Type::Rock | Type::Bug | Type::Ghost | Type::Steel => MoveCategory::Physical,
@@ -202,7 +176,7 @@ impl Ability {
                 return Ok(ability_id as AbilityID);
             }
         }
-        Err(format!("Invalid ability '{}'", name))
+        Err(format!("invalid ability '{}'", name))
     }
 
     const fn name(ability: AbilityID) -> &'static str {
@@ -393,7 +367,7 @@ impl Nature {
     }
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Deserialize)]
 #[repr(u8)]
 pub enum StatIndex {
     Hp,
@@ -407,21 +381,6 @@ pub enum StatIndex {
 }
 
 impl StatIndex {
-    fn by_name(name: &str) -> Result<StatIndex, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "hp"    => Ok(StatIndex::Hp),
-            "atk"   => Ok(StatIndex::Atk),
-            "def"   => Ok(StatIndex::Def),
-            "spatk" => Ok(StatIndex::SpAtk),
-            "spdef" => Ok(StatIndex::SpDef),
-            "spd"   => Ok(StatIndex::Spd),
-            "acc"   => Ok(StatIndex::Acc),
-            "eva"   => Ok(StatIndex::Eva),
-            _ => Err(format!("Invalid stat index '{}'", name))
-        }
-    }
-
     const fn name(&self) -> &'static str {
         match self {
             StatIndex::Hp => "HP",

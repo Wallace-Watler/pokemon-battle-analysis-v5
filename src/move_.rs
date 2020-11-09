@@ -1,30 +1,17 @@
-use json::JsonValue;
+use serde::Deserialize;
 use std::fmt::{Debug, Error, Formatter};
 use std::fs;
-use std::process;
-use crate::{Type, StatIndex, FieldPosition, game_version};
+use crate::{Type, FieldPosition, game_version};
 use crate::battle_ai::move_effects::MoveEffect;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum MoveCategory {
     Physical,
     Special,
     Status
 }
 
-impl MoveCategory {
-    fn by_name(name: &str) -> Result<MoveCategory, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "physical" => Ok(MoveCategory::Physical),
-            "special"  => Ok(MoveCategory::Special),
-            "status"   => Ok(MoveCategory::Status),
-            _ => Err(format!("Invalid move category '{}'", name))
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum MoveTargeting {
     RandomOpponent,
     SingleAdjacentAlly,
@@ -42,26 +29,6 @@ pub enum MoveTargeting {
 }
 
 impl MoveTargeting {
-    fn by_name(name: &str) -> Result<MoveTargeting, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "randomopponent"         => Ok(MoveTargeting::RandomOpponent),
-            "singleadjacentally"     => Ok(MoveTargeting::SingleAdjacentAlly),
-            "singleadjacentopponent" => Ok(MoveTargeting::SingleAdjacentOpponent),
-            "singleadjacentpokemon"  => Ok(MoveTargeting::SingleAdjacentPokemon),
-            "singlepokemon"          => Ok(MoveTargeting::SinglePokemon),
-            "user"                   => Ok(MoveTargeting::User),
-            "useroradjacentally"     => Ok(MoveTargeting::UserOrAdjacentAlly),
-            "userandallallies"       => Ok(MoveTargeting::UserAndAllAllies),
-            "alladjacentopponents"   => Ok(MoveTargeting::AllAdjacentOpponents),
-            "alladjacentpokemon"     => Ok(MoveTargeting::AllAdjacentPokemon),
-            "allallies"              => Ok(MoveTargeting::AllAllies),
-            "allopponents"           => Ok(MoveTargeting::AllOpponents),
-            "allpokemon"             => Ok(MoveTargeting::AllPokemon),
-            _ => Err(format!("Invalid move targeting '{}'", name))
-        }
-    }
-
     const fn single_target(&self) -> bool {
         matches!(self, MoveTargeting::RandomOpponent
                      | MoveTargeting::SingleAdjacentAlly
@@ -98,8 +65,10 @@ impl MoveTargeting {
 
 pub type MoveID = u8;
 
+#[derive(Deserialize)]
 pub struct Move {
     name: String,
+    #[serde(rename = "type")]
     type_: Type,
     category: MoveCategory,
     /// An accuracy of 0 means this move ignores accuracy checks and will always hit.
@@ -120,7 +89,7 @@ impl Move {
                 }
             }
         }
-        Err(format!("Invalid move '{}'", name))
+        Err(format!("invalid move '{}'", name))
     }
 
     fn by_id(move_id: MoveID) -> &'static Move {
@@ -185,107 +154,10 @@ pub fn initialize_moves() {
     let mut path = String::from("resources/");
     path.push_str(game_version().name());
     path.push_str("/moves.json");
-    let moves_json = fs::read_to_string(path.as_str()).unwrap_or_else(|_| panic!("Failed to read {}.", path));
-
-    match json::parse(moves_json.as_str()) {
-        json::Result::Ok(parsed) => {
-            match parsed {
-                JsonValue::Array(array) => {
-                    let extract_string = |json_value: &mut JsonValue, key: &str| -> String {
-                        json_value.remove(key).as_str()
-                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid string field '{}'", json_value.pretty(4), key))
-                            .to_owned()
-                    };
-                    let extract_type = |json_value: &mut JsonValue, key: &str| -> Type {
-                        let string = extract_string(json_value, key);
-                        Type::by_name(string.as_str())
-                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_type_def = |json_value: &mut JsonValue, key: &str, default: Type| -> Type {
-                        if !json_value.has_key(key) { return default; }
-                        let string = extract_string(json_value, key);
-                        Type::by_name(string.as_str()).unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in member\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_category = |json_value: &mut JsonValue, key: &str| -> MoveCategory {
-                        let string = extract_string(json_value, key);
-                        MoveCategory::by_name(string.as_str())
-                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_targeting = |json_value: &mut JsonValue, key: &str| -> MoveTargeting {
-                        let string = extract_string(json_value, key);
-                        MoveTargeting::by_name(string.as_str())
-                            .unwrap_or_else(|_| panic!("Invalid moves.json: '{}' in object\n{}\nis not a valid {}", string, json_value.pretty(4), key))
-                    };
-                    let extract_u8 = |json_value: &mut JsonValue, key: &str| -> u8 {
-                        json_value.remove(key).as_u8()
-                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid u8 field '{}'", json_value.pretty(4), key))
-                    };
-                    let extract_u8_def = |json_value: &mut JsonValue, key: &str, default: u8| -> u8 {
-                        if !json_value.has_key(key) { return default; }
-                        json_value.remove(key).as_u8()
-                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\nhas an invalid u8 field '{}'", json_value.pretty(4), key))
-                    };
-                    let extract_i8 = |json_value: &mut JsonValue, key: &str| -> i8 {
-                        json_value.remove(key).as_i8()
-                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid i8 field '{}'", json_value.pretty(4), key))
-                    };
-                    let extract_bool = |json_value: &mut JsonValue, key: &str| -> bool {
-                        json_value.remove(key).as_bool()
-                            .unwrap_or_else(|| panic!("Invalid moves.json: member\n{}\ndoes not have a valid boolean field '{}'", json_value.pretty(4), key))
-                    };
-
-                    for mut json_move in array {
-                        let type_ = extract_type(&mut json_move, "type");
-                        let mut effects = Vec::new();
-
-                        for mut json_effect in json_move.remove("effects").members_mut() {
-                            let effect;
-                            let name = extract_string(&mut json_effect, "name");
-                            match name.as_str() {
-                                "StdDamage" => {
-                                    effect = MoveEffect::StdDamage(
-                                        extract_type_def(&mut json_effect, "damage_type", type_),
-                                        extract_u8(&mut json_effect, "power"),
-                                        extract_u8_def(&mut json_effect, "critical_hit_stage_bonus", 0),
-                                        extract_u8_def(&mut json_effect, "recoil_divisor", 0)
-                                    );
-                                },
-                                "IncTargetStatStage" => {
-                                    effect = MoveEffect::IncTargetStatStage(
-                                        StatIndex::by_name(extract_string(&mut json_effect, "stat_index").as_str())
-                                            .unwrap_or_else(|_| panic!("Invalid moves.json: 'stat_index' in object\n{}\nis not a valid stat index", json_effect.pretty(4))),
-                                        extract_i8(&mut json_effect, "amount")
-                                    );
-                                },
-                                "LeechSeed" => effect = MoveEffect::LeechSeed,
-                                "Struggle" => effect = MoveEffect::Struggle,
-                                _ => panic!("Invalid moves.json: '{}' in move effect\n{}\nis not a valid move effect", name, json_effect.pretty(4))
-                            }
-                            effects.push(effect);
-                        }
-
-                        let category = extract_category(&mut json_move, "category");
-                        unsafe {
-                            MOVES.push(Move {
-                                name: extract_string(&mut json_move, "name").to_owned(),
-                                type_,
-                                category: if game_version().gen() <= 3 && category != MoveCategory::Status { type_.category() } else { category },
-                                accuracy: extract_u8(&mut json_move, "accuracy"),
-                                targeting: extract_targeting(&mut json_move, "targeting"),
-                                max_pp: extract_u8(&mut json_move, "max_pp"),
-                                priority_stage: extract_i8(&mut json_move, "priority_stage"),
-                                sound_based: extract_bool(&mut json_move, "sound_based"),
-                                effects
-                            });
-                        }
-                    }
-                },
-                _ => panic!("Invalid moves.json: not an array of objects")
-            }
-        },
-        json::Result::Err(error) => {
-            println!("{}", error);
-            process::exit(1);
-        }
+    let moves_json = fs::read_to_string(path.as_str())
+        .unwrap_or_else(|_| panic!("Failed to read {}.", path));
+    unsafe {
+        MOVES = serde_json::from_str(moves_json.as_str())
+            .unwrap_or_else(|err| panic!("Error parsing moves.json: {}", err));
     }
 }
