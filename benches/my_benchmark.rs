@@ -1,7 +1,9 @@
+use pokemon_battle_analysis_v5::GameVersion;
+use pokemon_battle_analysis_v5::move_;
+use pokemon_battle_analysis_v5::species;
+use pokemon_battle_analysis_v5::battle_ai::state;
+use pokemon_battle_analysis_v5::battle_ai::pokemon::PokemonBuild;
 use criterion::{Criterion, criterion_group, criterion_main};
-use pokemon_battle_analysis_v5::{GameVersion, species, state, move_};
-use pokemon_battle_analysis_v5::state::State;
-use pokemon_battle_analysis_v5::solution::PokemonBuild;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
 
@@ -15,25 +17,22 @@ fn ai_benchmark(c: &mut Criterion) {
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
     let bulbasaur_build = PokemonBuild::new(&mut rng);
-    let test_pokemon = [
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon()
+    let bulbasaur_builds = [
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone()
     ];
 
-    let test_state = || State::new(test_pokemon.clone(), Default::default(), Default::default());
-
-    c.bench_function("Pokemon AI Setup", |b| b.iter(|| test_state()));
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(test_state(), &mut rng)));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(bulbasaur_builds.clone(), &mut rng)));
 }
 
 criterion_group!{

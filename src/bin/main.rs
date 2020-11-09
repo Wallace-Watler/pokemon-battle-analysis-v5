@@ -1,11 +1,11 @@
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
 
-use pokemon_battle_analysis_v5::{GameVersion, state};
+use pokemon_battle_analysis_v5::GameVersion;
 use pokemon_battle_analysis_v5::move_;
-use pokemon_battle_analysis_v5::solution::PokemonBuild;
 use pokemon_battle_analysis_v5::species;
-use pokemon_battle_analysis_v5::state::State;
+use pokemon_battle_analysis_v5::battle_ai::state;
+use pokemon_battle_analysis_v5::battle_ai::pokemon::PokemonBuild;
 use rand::SeedableRng;
 use rand::prelude::StdRng;
 
@@ -26,22 +26,30 @@ fn main() {
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
     let bulbasaur_build = PokemonBuild::new(&mut rng);
-    let test_pokemon = [
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon(),
-        bulbasaur_build.create_pokemon()
+    let bulbasaur_builds = [
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone(),
+        bulbasaur_build.clone()
     ];
 
-    let test_state = || State::new(test_pokemon.clone(), Default::default(), Default::default());
+    //state::run_battle(bulbasaur_builds, &mut rng);
 
-    state::run_battle(test_state(), &mut rng);
+    let mut writer = csv::Writer::from_path("test_ser.csv").unwrap();
+    writer.serialize(bulbasaur_build).unwrap();
+    writer.flush().unwrap();
+
+    let mut reader = csv::Reader::from_path("test_ser.csv").unwrap();
+    for record in reader.deserialize() {
+        let pokemon_build: PokemonBuild = record.unwrap();
+        println!("{:?}", pokemon_build);
+    }
 }

@@ -1,15 +1,14 @@
-use std::cmp::{max, min, Ordering};
-
 use rand::prelude::StdRng;
 use rand::Rng;
+use std::cmp::{max, min, Ordering};
+use crate::battle_ai::{game_theory, pokemon};
+use crate::{FieldPosition, Weather, Terrain, choose_weighted_index, MajorStatusAilment};
+use crate::battle_ai::move_effects::Action;
+use crate::move_::Move;
+use crate::battle_ai::pokemon::{Pokemon, PokemonBuild};
+use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix};
 
-use crate::{choose_weighted_index, FieldPosition, game_theory, MajorStatusAilment, pokemon, Terrain, Weather};
-use crate::game_theory::{Matrix, ZeroSumNashEq};
-use crate::pokemon::Pokemon;
-use std::borrow::Borrow;
-use crate::move_::{Action, Move};
-
-pub const AI_LEVEL: u8 = 3;
+const AI_LEVEL: u8 = 3;
 
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
@@ -22,16 +21,16 @@ pub struct State {
     pub max_pokemon_id: Option<u8>,
     pub weather: Weather,
     pub terrain: Terrain,
-    pub turn_number: u16,
+    turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
-    pub display_text: Vec<String>,
-    pub children: Vec<State>,
-    pub num_maximizer_actions: usize,
-    pub num_minimizer_actions: usize
+    display_text: Vec<String>,
+    children: Vec<State>,
+    num_maximizer_actions: usize,
+    num_minimizer_actions: usize
 }
 
 impl State {
-    pub const fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain) -> State {
+    const fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain) -> State {
         State {
             pokemon,
             min_pokemon_id: None,
@@ -52,6 +51,14 @@ impl State {
 
     pub fn pokemon_by_id_mut(&mut self, pokemon_id: u8) -> &mut Pokemon {
         &mut self.pokemon[pokemon_id as usize]
+    }
+
+    pub fn weather() {
+
+    }
+
+    pub fn add_display_text(&mut self, text: String) {
+        self.display_text.push(text);
     }
 
     fn print_display_text(&self) {
@@ -77,7 +84,7 @@ impl State {
     }
 
     pub fn battle_end_check(&self) -> bool {
-        self.pokemon[0..5].iter().all(|pokemon| pokemon.current_hp == 0) || self.pokemon[6..11].iter().all(|pokemon| pokemon.current_hp == 0)
+        self.pokemon[0..5].iter().all(|pokemon| pokemon.current_hp() == 0) || self.pokemon[6..11].iter().all(|pokemon| pokemon.current_hp() == 0)
     }
 }
 
@@ -88,7 +95,22 @@ impl State {
 /// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle(mut state: State, rng: &mut StdRng) -> f64 {
+pub fn run_battle(pokemon_builds: [PokemonBuild; 12], rng: &mut StdRng) -> f64 {
+    let mut state = State::new([
+                                   Pokemon::from(pokemon_builds[0].clone()),
+                                   Pokemon::from(pokemon_builds[1].clone()),
+                                   Pokemon::from(pokemon_builds[2].clone()),
+                                   Pokemon::from(pokemon_builds[3].clone()),
+                                   Pokemon::from(pokemon_builds[4].clone()),
+                                   Pokemon::from(pokemon_builds[5].clone()),
+                                   Pokemon::from(pokemon_builds[6].clone()),
+                                   Pokemon::from(pokemon_builds[7].clone()),
+                                   Pokemon::from(pokemon_builds[8].clone()),
+                                   Pokemon::from(pokemon_builds[9].clone()),
+                                   Pokemon::from(pokemon_builds[10].clone()),
+                                   Pokemon::from(pokemon_builds[11].clone())
+                               ], Weather::default(), Terrain::default());
+
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
@@ -120,8 +142,8 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
         return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
-            expected_payoff: (state.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()
-                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp as f64 / pokemon.max_hp as f64).sum::<f64>()) / 6.0,
+            expected_payoff: (state.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp() as f64 / pokemon.max_hp() as f64).sum::<f64>()
+                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp() as f64 / pokemon.max_hp() as f64).sum::<f64>()) / 6.0,
         };
     }
 
@@ -200,7 +222,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                 Some(id) => {
                     if id >= 6 { // Only minimizer must choose
                         let choices: Vec<u8> = (0..6)
-                            .filter(|id| state.pokemon[*id as usize].current_hp > 0)
+                            .filter(|id| state.pokemon[*id as usize].current_hp() > 0)
                             .collect();
                         for choice in &choices {
                             let mut child = state.copy_game_state();
@@ -210,7 +232,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                         state.num_maximizer_actions = 1;
                         state.num_minimizer_actions = choices.len();
                     } else { // Only maximizer must choose
-                        let choices: Vec<u8> = (6..12).filter(|id| state.pokemon[*id as usize].current_hp > 0).collect();
+                        let choices: Vec<u8> = (6..12).filter(|id| state.pokemon[*id as usize].current_hp() > 0).collect();
                         for choice in &choices {
                             let mut child = state.copy_game_state();
                             pokemon::add_to_field(&mut child, *choice, FieldPosition::Max);
@@ -222,11 +244,11 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                 },
                 None => { // Both agents must choose
                     let minimizer_choices: Vec<_> = (0..6)
-                        .filter(|id| state.pokemon[*id as usize].current_hp > 0)
+                        .filter(|id| state.pokemon[*id as usize].current_hp() > 0)
                         .collect();
 
                     let maximizer_choices: Vec<_> = (6..12)
-                        .filter(|id| state.pokemon[*id as usize].current_hp > 0)
+                        .filter(|id| state.pokemon[*id as usize].current_hp() > 0)
                         .collect();
 
                     for maximizer_choice in &maximizer_choices {
@@ -259,15 +281,15 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                 }
 
                 let user = &state.pokemon[user_id as usize];
-                for move_index in 0..user.known_moves.len() {
+                for move_index in 0..user.known_moves().len() as u8 {
                     if user.can_choose_move(Some(move_index)) {
-                        let move_ = user.known_moves[move_index].move_;
+                        let move_ = user.known_move(move_index).move_();
                         actions.push(Action::Move {
                             user_id,
                             move_,
-                            move_index: Some(move_index as u8),
+                            move_index: Some(move_index),
                             target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                                .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position.unwrap(), *field_pos)).collect(),
+                                .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
                         });
                     }
                 }
@@ -280,14 +302,14 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                         move_: struggle,
                         move_index: None,
                         target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                            .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position.unwrap(), *field_pos)).collect(),
+                            .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
                     });
                 }
 
                 // TODO: It doesn't help much to check switch actions every turn; maybe have a flag to signal when a check should be made?
                 for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
-                    let team_member: &Pokemon = state.pokemon[team_member_id].borrow();
-                    if team_member.current_hp > 0 && team_member.field_position == None && team_member.known_moves.iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
+                    let team_member = state.pokemon_by_id(team_member_id);
+                    if team_member.current_hp() > 0 && team_member.field_position() == None && team_member.known_moves().iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
                         actions.push(Action::Switch {
                             user_id,
                             switching_in_id: team_member_id as u8
@@ -351,7 +373,7 @@ fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Orderi
 fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut StdRng) {
     let turn_number = state.turn_number;
     if cfg!(feature = "print-battle") {
-        state.display_text.push(format!("---- Turn {} ----", turn_number));
+        state.add_display_text(format!("---- Turn {} ----", turn_number));
     }
 
     if action_queue.len() == 2 && action_queue[1].outspeeds(state, action_queue[0], rng) {
@@ -378,9 +400,9 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
             if state.pokemon[pokemon_id as usize].major_status_ailment() == MajorStatusAilment::Poisoned {
                 if cfg!(feature = "print-battle") {
                     let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
-                    state.display_text.push(display_text);
+                    state.add_display_text(display_text);
                 }
-                if pokemon::apply_damage(state, pokemon_id, max(state.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16) {
+                if pokemon::apply_damage(state, pokemon_id, max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16) {
                     return;
                 }
             }
@@ -388,9 +410,9 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
             if let Some(seeder_id) = state.pokemon[pokemon_id as usize].seeded_by {
                 if cfg!(feature = "print-battle") {
                     let display_text = format!("{}'s seed drains energy from {}!", state.pokemon[pokemon_id as usize], state.pokemon[pokemon_id as usize]);
-                    state.display_text.push(display_text);
+                    state.add_display_text(display_text);
                 }
-                let transferred_hp = max(state.pokemon[pokemon_id as usize].max_hp / 8, 1) as i16;
+                let transferred_hp = max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16;
                 if pokemon::apply_damage(state, pokemon_id, transferred_hp) {
                     return;
                 }

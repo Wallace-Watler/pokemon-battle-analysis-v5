@@ -8,7 +8,7 @@ pub struct ZeroSumNashEq {
     /// The minimizing player's strategy at equilibrium.
     pub min_player_strategy: Vec<f64>,
     /// The expected payoff for the maximizing player at equilibrium.
-    pub expected_payoff: f64,
+    pub expected_payoff: f64
 }
 
 /// Calculates the Nash equilibrium of a zero-sum payoff matrix.
@@ -129,16 +129,6 @@ pub struct Matrix {
 }
 
 impl Matrix {
-    pub fn from(entries: Vec<f64>, num_rows: usize, num_cols: usize) -> Matrix {
-        debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
-        debug_assert!(entries.len() == num_rows * num_cols, "Number of matrix entries does not match the specified dimensions.");
-        Matrix {
-            entries,
-            num_rows,
-            num_cols,
-        }
-    }
-
     pub fn of(fill: f64, num_rows: usize, num_cols: usize) -> Self {
         debug_assert_ne!(num_rows as f64 * num_cols as f64 >= 2.0_f64.powf(16.0), true);
         Matrix {
@@ -165,7 +155,7 @@ impl Matrix {
     }
 
     #[inline(always)]
-    fn get(&self, i: usize, j: usize) -> f64 {
+    pub fn get(&self, i: usize, j: usize) -> f64 {
         self.entries[self.flat_index(i, j)]
     }
 
@@ -175,14 +165,14 @@ impl Matrix {
         self.entries.get_mut(flat_index).unwrap()
     }
 
-    fn set_row(&mut self, i: usize, value: f64) {
+    pub fn set_row(&mut self, i: usize, value: f64) {
         let flat_indices = (0..self.num_cols()).map(|j| self.flat_index(i, j)).collect::<Vec<usize>>();
         for flat_index in flat_indices {
             self.entries[flat_index] = value;
         }
     }
 
-    fn set_col(&mut self, j: usize, value: f64) {
+    pub fn set_col(&mut self, j: usize, value: f64) {
         let flat_indices = (0..self.num_rows()).map(|i| self.flat_index(i, j)).collect::<Vec<usize>>();
         for flat_index in flat_indices {
             self.entries[flat_index] = value;

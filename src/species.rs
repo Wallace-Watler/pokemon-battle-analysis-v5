@@ -1,13 +1,13 @@
-use crate::{game_version, StatIndex, Ability, Gender, Type, AbilityID};
+use json::JsonValue;
 use rand::prelude::StdRng;
 use rand::Rng;
 use std::fs;
 use std::cmp::min;
+use std::process;
+use crate::{Gender, Ability, AbilityID, Type, StatIndex, game_version};
 use crate::move_::{MoveID, Move};
-use std::process::exit;
-use json::JsonValue;
 
-pub type SpeciesID = u16;
+pub type SpeciesID = u8;
 
 #[derive(Debug, Default)]
 pub struct Species {
@@ -29,15 +29,15 @@ pub struct Species {
 }
 
 impl Species {
-    pub fn id_by_name(name: &str) -> SpeciesID {
+    pub fn id_by_name(name: &str) -> Result<SpeciesID, String> {
         unsafe {
             for (species_id, species) in SPECIES.iter().enumerate() {
                 if species.name.eq_ignore_ascii_case(name) {
-                    return species_id as SpeciesID;
+                    return Ok(species_id as SpeciesID);
                 }
             }
         }
-        panic!(format!("Invalid species '{}'.", name));
+        Err(format!("Invalid species '{}'.", name))
     }
 
     fn by_id(species_id: SpeciesID) -> &'static Species {
@@ -185,7 +185,7 @@ pub fn initialize_species() {
         },
         json::Result::Err(error) => {
             println!("{}", error);
-            exit(1);
+            process::exit(1);
         }
     }
 }

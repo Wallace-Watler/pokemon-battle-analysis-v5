@@ -1,22 +1,18 @@
+use crate::move_::MoveCategory;
+use rand::Rng;
+use rand::prelude::StdRng;
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::fmt::Debug;
 use std::intrinsics::transmute;
 
-use rand::Rng;
-
-use crate::move_::MoveCategory;
-use rand::prelude::StdRng;
-
-pub mod game_theory;
+pub mod battle_ai;
 pub mod move_;
-pub mod pokemon;
-pub mod solution;
 pub mod species;
-pub mod state;
 
 pub static mut GAME_VERSION: GameVersion = GameVersion::SS;
 
-pub fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
+fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
 
 fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
     if min > max { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
@@ -67,7 +63,7 @@ impl FieldPosition {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum Type {
     None,
@@ -194,6 +190,7 @@ impl Default for Weather {
 
 type AbilityID = u8;
 
+#[derive(Deserialize, Serialize)]
 struct Ability {
     name: &'static str
 }
@@ -206,6 +203,10 @@ impl Ability {
             }
         }
         Err(format!("Invalid ability '{}'", name))
+    }
+
+    const fn name(ability: AbilityID) -> &'static str {
+        ABILITIES[ability as usize].name
     }
 }
 
@@ -269,7 +270,7 @@ impl Default for GameVersion {
     fn default() -> Self { GameVersion::SS }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum Gender {
     None,
@@ -278,24 +279,6 @@ pub enum Gender {
 }
 
 impl Gender {
-    fn by_name(name: &str) -> Result<Gender, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "none" => Ok(Gender::None),
-            "male" => Ok(Gender::Male),
-            "female" => Ok(Gender::Female),
-            _ => Err(format!("Invalid gender '{}'", name))
-        }
-    }
-
-    const fn name(&self) -> &'static str {
-        match self {
-            Gender::None => "None",
-            Gender::Male => "Male",
-            Gender::Female => "Female"
-        }
-    }
-
     const fn symbol(&self) -> &'static str {
         match self {
             Gender::None => "",
@@ -343,9 +326,9 @@ impl Default for MajorStatusAilment {
     fn default() -> Self { MajorStatusAilment::Okay }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[repr(u8)]
-pub enum Nature {
+enum Nature {
     Adamant,
     Bashful,
     Bold,
@@ -374,41 +357,9 @@ pub enum Nature {
 }
 
 impl Nature {
-    pub fn random_nature(rng: &mut StdRng) -> Nature {
+    fn random_nature(rng: &mut StdRng) -> Nature {
         unsafe {
             transmute::<u8, Nature>(rng.gen_range(0, 25))
-        }
-    }
-
-    fn by_name(name: &str) -> Result<Nature, String> {
-        let n = name.to_ascii_lowercase();
-        match n.as_str() {
-            "adamant" => Ok(Nature::Adamant),
-            "bashful" => Ok(Nature::Bashful),
-            "bold"    => Ok(Nature::Bold),
-            "brave"   => Ok(Nature::Brave),
-            "calm"    => Ok(Nature::Calm),
-            "careful" => Ok(Nature::Careful),
-            "docile"  => Ok(Nature::Docile),
-            "gentle"  => Ok(Nature::Gentle),
-            "hardy"   => Ok(Nature::Hardy),
-            "hasty"   => Ok(Nature::Hasty),
-            "impish"  => Ok(Nature::Impish),
-            "jolly"   => Ok(Nature::Jolly),
-            "lax"     => Ok(Nature::Lax),
-            "lonely"  => Ok(Nature::Lonely),
-            "mild"    => Ok(Nature::Mild),
-            "modest"  => Ok(Nature::Modest),
-            "naive"   => Ok(Nature::Naive),
-            "naughty" => Ok(Nature::Naughty),
-            "quiet"   => Ok(Nature::Quiet),
-            "quirky"  => Ok(Nature::Quirky),
-            "rash"    => Ok(Nature::Rash),
-            "relaxed" => Ok(Nature::Relaxed),
-            "sassy"   => Ok(Nature::Sassy),
-            "serious" => Ok(Nature::Serious),
-            "timid"   => Ok(Nature::Timid),
-            _ => Err(format!("Invalid nature '{}'", name))
         }
     }
 
