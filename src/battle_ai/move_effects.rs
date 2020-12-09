@@ -150,7 +150,7 @@ impl Action {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub enum MoveEffect {
     /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
     StdDamage(Type, u8, u8, u8),

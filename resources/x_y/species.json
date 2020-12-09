@@ -3,8 +3,9 @@
         "name": "Bulbasaur",
         "type1": "Grass",
         "type2": "Poison",
-        "ability1": "Overgrow",
-        "ability2": "None",
+        "abilities": [
+            "Overgrow"
+        ],
         "base_stats": [45, 49, 49, 65, 65, 45],
         "weight": 69,
         "male_chance": 875,

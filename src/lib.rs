@@ -9,6 +9,7 @@ use std::intrinsics::transmute;
 pub mod battle_ai;
 pub mod move_;
 pub mod species;
+pub mod combinatorial_optim;
 
 pub static mut GAME_VERSION: GameVersion = GameVersion::SS;
 
@@ -32,7 +33,7 @@ fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
     weights.len() - 1
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum FieldPosition {
     Min,
@@ -63,7 +64,7 @@ impl FieldPosition {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum Type {
     None,
@@ -130,7 +131,7 @@ impl Default for Type {
     fn default() -> Self { Type::None }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Terrain {
     Normal,
@@ -144,7 +145,7 @@ impl Default for Terrain {
     fn default() -> Self { Terrain::Normal }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Weather {
     None,
@@ -170,6 +171,10 @@ struct Ability {
 }
 
 impl Ability {
+    const fn count() -> AbilityID {
+        ABILITIES.len() as AbilityID
+    }
+
     fn id_by_name(name: &str) -> Result<AbilityID, String> {
         for (ability_id, ability) in ABILITIES.iter().enumerate() {
             if ability.name.eq_ignore_ascii_case(name) {
@@ -184,8 +189,7 @@ impl Ability {
     }
 }
 
-const ABILITIES: [Ability; 3] = [
-    Ability { name: "None" },
+const ABILITIES: [Ability; 2] = [
     Ability { name: "Chlorophyll" },
     Ability { name: "Overgrow" }
 ];
@@ -244,20 +248,41 @@ impl Default for GameVersion {
     fn default() -> Self { GameVersion::SS }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum Gender {
-    None,
+    Female,
     Male,
-    Female
+    None
 }
 
 impl Gender {
+    const fn count() -> u8 {
+        3
+    }
+
+    const fn id(&self) -> u8 {
+        match self {
+            Gender::Female => 0,
+            Gender::Male => 1,
+            Gender::None => 2
+        }
+    }
+
+    fn by_id(id: u8) -> Gender {
+        match id {
+            0 => Gender::Female,
+            1 => Gender::Male,
+            2 => Gender::None,
+            _ => panic!("No gender with id '{}'", id)
+        }
+    }
+
     const fn symbol(&self) -> &'static str {
         match self {
-            Gender::None => "",
+            Gender::Female => "♀",
             Gender::Male => "♂",
-            Gender::Female => "♀"
+            Gender::None => ""
         }
     }
 }
@@ -300,9 +325,9 @@ impl Default for MajorStatusAilment {
     fn default() -> Self { MajorStatusAilment::Okay }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 #[repr(u8)]
-enum Nature {
+pub enum Nature {
     Adamant,
     Bashful,
     Bold,
@@ -331,43 +356,108 @@ enum Nature {
 }
 
 impl Nature {
+    const fn count() -> u8 {
+        25
+    }
+
+    const fn id(&self) -> u8 {
+        match self {
+            Nature::Adamant => 0,
+            Nature::Bashful => 1,
+            Nature::Bold => 2,
+            Nature::Brave => 3,
+            Nature::Calm => 4,
+            Nature::Careful => 5,
+            Nature::Docile => 6,
+            Nature::Gentle => 7,
+            Nature::Hardy => 8,
+            Nature::Hasty => 9,
+            Nature::Impish => 10,
+            Nature::Jolly => 11,
+            Nature::Lax => 12,
+            Nature::Lonely => 13,
+            Nature::Mild => 14,
+            Nature::Modest => 15,
+            Nature::Naive => 16,
+            Nature::Naughty => 17,
+            Nature::Quiet => 18,
+            Nature::Quirky => 19,
+            Nature::Rash => 20,
+            Nature::Relaxed => 21,
+            Nature::Sassy => 22,
+            Nature::Serious => 23,
+            Nature::Timid => 24
+        }
+    }
+
+    fn by_id(id: u8) -> Nature {
+        match id {
+            0 => Nature::Adamant,
+            1 => Nature::Bashful,
+            2 => Nature::Bold,
+            3 => Nature::Brave,
+            4 => Nature::Calm,
+            5 => Nature::Careful,
+            6 => Nature::Docile,
+            7 => Nature::Gentle,
+            8 => Nature::Hardy,
+            9 => Nature::Hasty,
+            10 => Nature::Impish,
+            11 => Nature::Jolly,
+            12 => Nature::Lax,
+            13 => Nature::Lonely,
+            14 => Nature::Mild,
+            15 => Nature::Modest,
+            16 => Nature::Naive,
+            17 => Nature::Naughty,
+            18 => Nature::Quiet,
+            19 => Nature::Quirky,
+            20 => Nature::Rash,
+            21 => Nature::Relaxed,
+            22 => Nature::Sassy,
+            23 => Nature::Serious,
+            24 => Nature::Timid,
+            _ => panic!("No nature with id '{}'", id)
+        }
+    }
+
     fn random_nature(rng: &mut StdRng) -> Nature {
         unsafe {
             transmute::<u8, Nature>(rng.gen_range(0, 25))
         }
     }
 
-    const fn stat_mod(&self, stat_index: StatIndex) -> f64 {
-        match stat_index {
+    const fn stat_mod(&self, stat: StatIndex) -> f64 {
+        match stat {
             StatIndex::Hp | StatIndex::Acc | StatIndex::Eva => 1.0,
             _ => match self {
-                Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Bold    => [0.9, 1.1, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Brave   => [1.1, 1.0, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Calm    => [0.9, 1.0, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Gentle  => [1.0, 0.9, 1.0, 1.1, 1.0][stat_index.as_usize() - 1],
-                Nature::Hasty   => [1.0, 0.9, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
-                Nature::Impish  => [1.0, 1.1, 0.9, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Jolly   => [1.0, 1.0, 0.9, 1.0, 1.1][stat_index.as_usize() - 1],
-                Nature::Lax     => [1.0, 1.1, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Lonely  => [1.1, 0.9, 1.0, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Mild    => [1.0, 0.9, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Modest  => [0.9, 1.0, 1.1, 1.0, 1.0][stat_index.as_usize() - 1],
-                Nature::Naive   => [1.0, 1.0, 1.0, 0.9, 1.1][stat_index.as_usize() - 1],
-                Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Quiet   => [1.0, 1.0, 1.1, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Rash    => [1.0, 1.0, 1.1, 0.9, 1.0][stat_index.as_usize() - 1],
-                Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][stat_index.as_usize() - 1],
-                Nature::Sassy   => [1.0, 1.0, 1.0, 1.1, 0.9][stat_index.as_usize() - 1],
-                Nature::Timid   => [0.9, 1.0, 1.0, 1.0, 1.1][stat_index.as_usize() - 1],
+                Nature::Adamant => [1.1, 1.0, 0.9, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Bold    => [0.9, 1.1, 1.0, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Brave   => [1.1, 1.0, 1.0, 1.0, 0.9][stat.as_usize() - 1],
+                Nature::Calm    => [0.9, 1.0, 1.0, 1.1, 1.0][stat.as_usize() - 1],
+                Nature::Careful => [1.0, 1.0, 0.9, 1.1, 1.0][stat.as_usize() - 1],
+                Nature::Gentle  => [1.0, 0.9, 1.0, 1.1, 1.0][stat.as_usize() - 1],
+                Nature::Hasty   => [1.0, 0.9, 1.0, 1.0, 1.1][stat.as_usize() - 1],
+                Nature::Impish  => [1.0, 1.1, 0.9, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Jolly   => [1.0, 1.0, 0.9, 1.0, 1.1][stat.as_usize() - 1],
+                Nature::Lax     => [1.0, 1.1, 1.0, 0.9, 1.0][stat.as_usize() - 1],
+                Nature::Lonely  => [1.1, 0.9, 1.0, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Mild    => [1.0, 0.9, 1.1, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Modest  => [0.9, 1.0, 1.1, 1.0, 1.0][stat.as_usize() - 1],
+                Nature::Naive   => [1.0, 1.0, 1.0, 0.9, 1.1][stat.as_usize() - 1],
+                Nature::Naughty => [1.1, 1.0, 1.0, 0.9, 1.0][stat.as_usize() - 1],
+                Nature::Quiet   => [1.0, 1.0, 1.1, 1.0, 0.9][stat.as_usize() - 1],
+                Nature::Rash    => [1.0, 1.0, 1.1, 0.9, 1.0][stat.as_usize() - 1],
+                Nature::Relaxed => [1.0, 1.1, 1.0, 1.0, 0.9][stat.as_usize() - 1],
+                Nature::Sassy   => [1.0, 1.0, 1.0, 1.1, 0.9][stat.as_usize() - 1],
+                Nature::Timid   => [0.9, 1.0, 1.0, 1.0, 1.1][stat.as_usize() - 1],
                 _ => 1.0
             }
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Deserialize)]
 #[repr(u8)]
 pub enum StatIndex {
     Hp,

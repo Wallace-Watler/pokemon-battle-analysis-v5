@@ -5,7 +5,7 @@ use crate::battle_ai::{game_theory, pokemon};
 use crate::{FieldPosition, Weather, Terrain, choose_weighted_index, MajorStatusAilment};
 use crate::battle_ai::move_effects::Action;
 use crate::move_::Move;
-use crate::battle_ai::pokemon::{Pokemon, PokemonBuild};
+use crate::battle_ai::pokemon::{Pokemon, TeamBuild};
 use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix};
 
 const AI_LEVEL: u8 = 3;
@@ -84,7 +84,7 @@ impl State {
     }
 
     pub fn battle_end_check(&self) -> bool {
-        self.pokemon[0..5].iter().all(|pokemon| pokemon.current_hp() == 0) || self.pokemon[6..11].iter().all(|pokemon| pokemon.current_hp() == 0)
+        self.pokemon[0..6].iter().all(|pokemon| pokemon.current_hp() == 0) || self.pokemon[6..12].iter().all(|pokemon| pokemon.current_hp() == 0)
     }
 }
 
@@ -95,21 +95,25 @@ impl State {
 /// average out to what one would obtain from a full state-space/probability tree search, but expect high variance
 /// between individual trials. Returns a heuristic value between -1.0 and 1.0 signifying how well the maximizer did;
 /// 0.0 would be a tie. The minimizer's value is its negation.
-pub fn run_battle(pokemon_builds: [PokemonBuild; 12], rng: &mut StdRng) -> f64 {
-    let mut state = State::new([
-                                   Pokemon::from(pokemon_builds[0].clone()),
-                                   Pokemon::from(pokemon_builds[1].clone()),
-                                   Pokemon::from(pokemon_builds[2].clone()),
-                                   Pokemon::from(pokemon_builds[3].clone()),
-                                   Pokemon::from(pokemon_builds[4].clone()),
-                                   Pokemon::from(pokemon_builds[5].clone()),
-                                   Pokemon::from(pokemon_builds[6].clone()),
-                                   Pokemon::from(pokemon_builds[7].clone()),
-                                   Pokemon::from(pokemon_builds[8].clone()),
-                                   Pokemon::from(pokemon_builds[9].clone()),
-                                   Pokemon::from(pokemon_builds[10].clone()),
-                                   Pokemon::from(pokemon_builds[11].clone())
-                               ], Weather::default(), Terrain::default());
+pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng) -> f64 {
+    let mut state = State::new({
+        let mut min_team = minimizer.remaining_team.iter();
+        let mut max_team = maximizer.remaining_team.iter();
+        [
+            Pokemon::from(&minimizer.party_leader),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(&maximizer.party_leader),
+            Pokemon::from(max_team.next().unwrap()),
+            Pokemon::from(max_team.next().unwrap()),
+            Pokemon::from(max_team.next().unwrap()),
+            Pokemon::from(max_team.next().unwrap()),
+            Pokemon::from(max_team.next().unwrap())
+        ]
+    }, Weather::default(), Terrain::default());
 
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");

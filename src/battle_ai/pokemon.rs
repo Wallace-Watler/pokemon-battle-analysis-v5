@@ -4,6 +4,8 @@ use serde::export::TryFrom;
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
+use std::collections::BTreeSet;
+use std::iter::FromIterator;
 use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, clamp};
 use crate::species::{SpeciesID, Species};
 use crate::battle_ai::move_effects::Action;
@@ -113,9 +115,9 @@ impl Pokemon {
     }
 }
 
-impl From<PokemonBuild> for Pokemon {
-    fn from(pb: PokemonBuild) -> Self {
-        let max_hp = (2 * Species::base_stat(pb.species, StatIndex::Hp) + pb.ivs[StatIndex::Hp.as_usize()] + pb.evs[StatIndex::Hp.as_usize()] / 4 + 110) as u16;
+impl From<&PokemonBuild> for Pokemon {
+    fn from(pb: &PokemonBuild) -> Self {
+        let max_hp = 2 * Species::base_stat(pb.species, StatIndex::Hp) as u16 + pb.ivs[StatIndex::Hp.as_usize()] as u16 + pb.evs[StatIndex::Hp.as_usize()] as u16 / 4 + 110;
         Pokemon {
             species: pb.species,
             first_type: Species::type1(pb.species),
@@ -153,19 +155,24 @@ impl Display for Pokemon {
 }
 
 /// Part of a `TeamBuild`; contains all the necessary information to create a `Pokemon` object.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(try_from = "PokemonBuildSerde", into = "PokemonBuildSerde")]
 pub struct PokemonBuild {
-    species: SpeciesID,
-    gender: Gender,
-    nature: Nature,
-    ability: AbilityID,
-    ivs: [u8; 6],
-    evs: [u8; 6],
-    moves: Vec<MoveID>
+    pub species: SpeciesID,
+    pub gender: Gender,
+    pub nature: Nature,
+    pub ability: AbilityID,
+    pub ivs: [u8; 6],
+    pub evs: [u8; 6],
+    /// Contains 0-4 moves.
+    pub moves: BTreeSet<MoveID>
 }
 
 impl PokemonBuild {
+    pub const fn num_vars() -> usize {
+        20
+    }
+
     pub fn new(rng: &mut StdRng) -> PokemonBuild {
         let species = Species::random_species(rng);
         let mut pokemon_build = PokemonBuild {
@@ -175,10 +182,38 @@ impl PokemonBuild {
             ability: Species::random_ability(species, rng),
             ivs: [rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32)],
             evs: [rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253)],
-            moves: Species::random_move_set(species, rng),
+            moves: BTreeSet::from_iter(Species::random_move_set(species, rng)),
         };
         pokemon_build.fix_evs(rng);
         pokemon_build
+    }
+
+    pub const fn species(&self) -> SpeciesID {
+        self.species
+    }
+
+    pub const fn gender(&self) -> Gender {
+        self.gender
+    }
+
+    pub const fn nature(&self) -> Nature {
+        self.nature
+    }
+
+    pub const fn ability(&self) -> AbilityID {
+        self.ability
+    }
+
+    pub const fn ivs(&self) -> &[u8] {
+        &self.ivs
+    }
+
+    pub const fn evs(&self) -> &[u8] {
+        &self.evs
+    }
+
+    pub fn moves(&self) -> &BTreeSet<MoveID> {
+        &self.moves
     }
 
     fn fix_evs(&mut self, rng: &mut StdRng) {
@@ -203,104 +238,74 @@ impl PokemonBuild {
 impl TryFrom<PokemonBuildSerde<'_>> for PokemonBuild {
     type Error = String;
 
-    fn try_from(pokemon_build_serde: PokemonBuildSerde) -> Result<Self, Self::Error> {
-        let mut ivs = [0; 6];
-        ivs[StatIndex::Hp.as_usize()] = pokemon_build_serde.iv_hp;
-        ivs[StatIndex::Atk.as_usize()] = pokemon_build_serde.iv_atk;
-        ivs[StatIndex::Def.as_usize()] = pokemon_build_serde.iv_def;
-        ivs[StatIndex::SpAtk.as_usize()] = pokemon_build_serde.iv_sp_atk;
-        ivs[StatIndex::SpDef.as_usize()] = pokemon_build_serde.iv_sp_def;
-        ivs[StatIndex::Spd.as_usize()] = pokemon_build_serde.iv_spd;
-
-        let mut evs = [0; 6];
-        evs[StatIndex::Hp.as_usize()] = pokemon_build_serde.ev_hp;
-        evs[StatIndex::Atk.as_usize()] = pokemon_build_serde.ev_atk;
-        evs[StatIndex::Def.as_usize()] = pokemon_build_serde.ev_def;
-        evs[StatIndex::SpAtk.as_usize()] = pokemon_build_serde.ev_sp_atk;
-        evs[StatIndex::SpDef.as_usize()] = pokemon_build_serde.ev_sp_def;
-        evs[StatIndex::Spd.as_usize()] = pokemon_build_serde.ev_spd;
-
-        Ok(
-            PokemonBuild {
-                species: Species::id_by_name(pokemon_build_serde.species)?,
-                gender: pokemon_build_serde.gender,
-                nature: pokemon_build_serde.nature,
-                ability: Ability::id_by_name(pokemon_build_serde.ability)?,
-                ivs,
-                evs,
-                moves: vec![
-                    Move::id_by_name(pokemon_build_serde.move_1)?,
-                    Move::id_by_name(pokemon_build_serde.move_2)?,
-                    Move::id_by_name(pokemon_build_serde.move_3)?,
-                    Move::id_by_name(pokemon_build_serde.move_4)?
-                ]
-            }
-        )
+    fn try_from(pb_serde: PokemonBuildSerde) -> Result<Self, Self::Error> {
+        Ok(PokemonBuild {
+            species: Species::id_by_name(pb_serde.species)?,
+            gender: pb_serde.gender,
+            nature: pb_serde.nature,
+            ability: Ability::id_by_name(pb_serde.ability)?,
+            ivs: pb_serde.ivs,
+            evs: pb_serde.evs,
+            moves: BTreeSet::from_iter(vec![
+                Move::id_by_name(pb_serde.move1)?,
+                Move::id_by_name(pb_serde.move2)?,
+                Move::id_by_name(pb_serde.move3)?,
+                Move::id_by_name(pb_serde.move4)?
+            ])
+        })
     }
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 struct PokemonBuildSerde<'d> {
     species: &'d str,
     gender: Gender,
     nature: Nature,
     ability: &'d str,
-    iv_hp: u8,
-    iv_atk: u8,
-    iv_def: u8,
-    iv_sp_atk: u8,
-    iv_sp_def: u8,
-    iv_spd: u8,
-    ev_hp: u8,
-    ev_atk: u8,
-    ev_def: u8,
-    ev_sp_atk: u8,
-    ev_sp_def: u8,
-    ev_spd: u8,
-    move_1: &'d str,
-    move_2: &'d str,
-    move_3: &'d str,
-    move_4: &'d str
+    ivs: [u8; 6],
+    evs: [u8; 6],
+    move1: &'d str,
+    move2: &'d str,
+    move3: &'d str,
+    move4: &'d str
 }
 
 impl From<PokemonBuild> for PokemonBuildSerde<'_> {
     fn from(pokemon_build: PokemonBuild) -> Self {
+        let moves: Vec<MoveID> = pokemon_build.moves.iter().copied().collect();
         PokemonBuildSerde {
             species: Species::name(pokemon_build.species),
             gender: pokemon_build.gender,
             nature: pokemon_build.nature,
             ability: Ability::name(pokemon_build.ability),
-            iv_hp: pokemon_build.ivs[StatIndex::Hp.as_usize()],
-            iv_atk: pokemon_build.ivs[StatIndex::Atk.as_usize()],
-            iv_def: pokemon_build.ivs[StatIndex::Def.as_usize()],
-            iv_sp_atk: pokemon_build.ivs[StatIndex::SpAtk.as_usize()],
-            iv_sp_def: pokemon_build.ivs[StatIndex::SpDef.as_usize()],
-            iv_spd: pokemon_build.ivs[StatIndex::Spd.as_usize()],
-            ev_hp: pokemon_build.evs[StatIndex::Hp.as_usize()],
-            ev_atk: pokemon_build.evs[StatIndex::Atk.as_usize()],
-            ev_def: pokemon_build.evs[StatIndex::Def.as_usize()],
-            ev_sp_atk: pokemon_build.evs[StatIndex::SpAtk.as_usize()],
-            ev_sp_def: pokemon_build.evs[StatIndex::SpDef.as_usize()],
-            ev_spd: pokemon_build.evs[StatIndex::Spd.as_usize()],
-            move_1: pokemon_build.moves.get(0).map(|move_| Move::name(*move_)).unwrap_or(""),
-            move_2: pokemon_build.moves.get(1).map(|move_| Move::name(*move_)).unwrap_or(""),
-            move_3: pokemon_build.moves.get(2).map(|move_| Move::name(*move_)).unwrap_or(""),
-            move_4: pokemon_build.moves.get(3).map(|move_| Move::name(*move_)).unwrap_or("")
+            ivs: pokemon_build.ivs,
+            evs: pokemon_build.evs,
+            move1: moves.get(0).map(|&move_| Move::name(move_)).unwrap_or(""),
+            move2: moves.get(1).map(|&move_| Move::name(move_)).unwrap_or(""),
+            move3: moves.get(2).map(|&move_| Move::name(move_)).unwrap_or(""),
+            move4: moves.get(3).map(|&move_| Move::name(move_)).unwrap_or("")
         }
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct TeamBuild {
-    pokemon_builds: [PokemonBuild; 6]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct TeamBuild {
+    /// The party leader is separate since they are always the first Pokemon sent out.
+    /// The rest of the team can be freely switched in and out of battle.
+    pub party_leader: PokemonBuild,
+    /// Contains the rest of the team.
+    pub remaining_team: [PokemonBuild; 5]
 }
 
 impl TeamBuild {
-    fn new(rng: &mut StdRng) -> TeamBuild {
+    pub const fn num_vars() -> usize {
+        PokemonBuild::num_vars() * 6
+    }
+
+    pub fn new(rng: &mut StdRng) -> TeamBuild {
         TeamBuild {
-            pokemon_builds: [
-                PokemonBuild::new(rng),
+            party_leader: PokemonBuild::new(rng),
+            remaining_team: [
                 PokemonBuild::new(rng),
                 PokemonBuild::new(rng),
                 PokemonBuild::new(rng),
@@ -315,7 +320,7 @@ impl TeamBuild {
 pub struct MoveInstance {
     move_: MoveID,
     pub pp: u8,
-    pub disabled: bool,
+    pub disabled: bool
 }
 
 impl MoveInstance {

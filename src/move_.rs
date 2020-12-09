@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::fmt::{Debug, Error, Formatter};
+use std::fmt::Debug;
 use std::fs;
 use crate::{Type, FieldPosition, game_version};
 use crate::battle_ai::move_effects::MoveEffect;
@@ -65,7 +65,7 @@ impl MoveTargeting {
 
 pub type MoveID = u8;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Move {
     name: String,
     #[serde(rename = "type")]
@@ -81,6 +81,12 @@ pub struct Move {
 }
 
 impl Move {
+    pub fn count() -> MoveID {
+        unsafe {
+            MOVES.len() as MoveID
+        }
+    }
+
     pub fn id_by_name(name: &str) -> Result<MoveID, String> {
         unsafe {
             for (move_id, moves) in MOVES.iter().enumerate() {
@@ -129,20 +135,6 @@ impl Move {
 
     pub fn effects(move_: MoveID) -> &'static [MoveEffect] {
         &Move::by_id(move_).effects
-    }
-}
-
-impl Debug for Move {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        f.debug_struct("Move")
-            .field("name", &self.name)
-            .field("type_", &self.type_)
-            .field("category", &self.category)
-            .field("targeting", &self.targeting)
-            .field("max_pp", &self.max_pp)
-            .field("priority_stage", &self.priority_stage)
-            .field("sound_based", &self.sound_based)
-            .finish()
     }
 }
 

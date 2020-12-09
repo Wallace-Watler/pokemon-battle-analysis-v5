@@ -2,7 +2,7 @@ use pokemon_battle_analysis_v5::GameVersion;
 use pokemon_battle_analysis_v5::move_;
 use pokemon_battle_analysis_v5::species;
 use pokemon_battle_analysis_v5::battle_ai::state;
-use pokemon_battle_analysis_v5::battle_ai::pokemon::PokemonBuild;
+use pokemon_battle_analysis_v5::battle_ai::pokemon::TeamBuild;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::StdRng;
 use rand::SeedableRng;
@@ -16,23 +16,7 @@ fn ai_benchmark(c: &mut Criterion) {
 
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
-    let bulbasaur_build = PokemonBuild::new(&mut rng);
-    let bulbasaur_builds = [
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone()
-    ];
-
-    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(bulbasaur_builds.clone(), &mut rng)));
+    c.bench_function("Pokemon AI", |b| b.iter(|| state::run_battle(&TeamBuild::new(&mut rng), &TeamBuild::new(&mut rng), &mut rng)));
 }
 
 criterion_group!{

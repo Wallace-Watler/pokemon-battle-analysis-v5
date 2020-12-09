@@ -1,13 +1,14 @@
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
 
+use pokemon_battle_analysis_v5::combinatorial_optim::Solver;
 use pokemon_battle_analysis_v5::GameVersion;
 use pokemon_battle_analysis_v5::move_;
 use pokemon_battle_analysis_v5::species;
-use pokemon_battle_analysis_v5::battle_ai::state;
-use pokemon_battle_analysis_v5::battle_ai::pokemon::PokemonBuild;
+use csv::WriterBuilder;
 use rand::SeedableRng;
 use rand::prelude::StdRng;
+use std::fs;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -25,21 +26,26 @@ fn main() {
 
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
-    let bulbasaur_build = PokemonBuild::new(&mut rng);
-    let bulbasaur_builds = [
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build.clone(),
-        bulbasaur_build
-    ];
+    let mut solver = match fs::read_to_string("solver.json") {
+        Ok(solver_json) => serde_json::from_str(solver_json.as_str()).unwrap(),
+        Err(_) => {
+            println!("Warning: Could not read solver.json. Creating a new solver.");
+            Solver::new()
+        }
+    };
 
-    state::run_battle(bulbasaur_builds, &mut rng);
+    let mut  i = 0;
+    loop {
+        println!("{}", i);
+        i += 1;
+        solver.do_iter(0.99, 30, &mut rng);
+        fs::write("solver.json", serde_json::to_string_pretty(&solver).unwrap()).unwrap();
+
+        let mut writer = WriterBuilder::new()
+            .has_headers(false)
+            .from_path("best_solutions.csv").unwrap();
+        for sol in solver.best_solutions() {
+            writer.serialize(sol).unwrap();
+        }
+    }
 }
