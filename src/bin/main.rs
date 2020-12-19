@@ -41,9 +41,16 @@ fn main() {
         solver.do_iter(0.99, 30, &mut rng);
         fs::write("solver.json", serde_json::to_string_pretty(&solver).unwrap()).unwrap();
 
+        let pb_header = "species,gender,nature,ability,iv_1,iv_2,iv_3,iv_4,iv_5,iv_6,ev_1,ev_2,ev_3,ev_4,ev_5,ev_6,move_1,move_2,move_3,move_4";
+        let mut tb_header = vec!["fitness", "fit_variance", "num_samples"];
+        for _ in 0..6 {
+            for s in pb_header.split(",") { tb_header.push(s); }
+        }
+
         let mut writer = WriterBuilder::new()
             .has_headers(false)
             .from_path("best_solutions.csv").unwrap();
+        writer.write_record(&tb_header).unwrap();
         for sol in solver.best_solutions() {
             writer.serialize(sol).unwrap();
         }

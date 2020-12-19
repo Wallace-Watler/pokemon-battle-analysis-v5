@@ -96,7 +96,14 @@ struct PokeVarData {
     nature: VariableData,
     ability: VariableData,
     ivs: [VariableData; 6],
-    evs: [VariableData; 6],
+    /// EVs are generated in a different way than the other variables. They are determined by
+    /// allocating 127 groups of 4 points each randomly into the six stat slots, weighted by
+    /// `ev_propensity`. 127 times 4 is 508, two less than the maximum of 510; however, the last two
+    /// points are meaningless in regards to stat calculation.
+    ///
+    /// Since the sum of the EVs must be 510, the problem to solve is not so much "how many EVs are
+    /// optimal?" but rather "which stats should receive more EVs than others?"
+    ev_propensity: VariableData,
     // All move data is combined since their order does not matter.
     moves: VariableData
 }
@@ -106,10 +113,6 @@ impl PokeVarData {
         let iv_var_data = VariableData {
             weights: vec![1.0; 32],
             counts: vec![1; 32]
-        };
-        let ev_var_data = VariableData {
-            weights: vec![1.0; 253],
-            counts: vec![1; 253]
         };
         PokeVarData {
             species: VariableData {
@@ -129,7 +132,10 @@ impl PokeVarData {
                 counts: vec![1; Ability::count() as usize]
             },
             ivs: [iv_var_data.clone(), iv_var_data.clone(), iv_var_data.clone(), iv_var_data.clone(), iv_var_data.clone(), iv_var_data],
-            evs: [ev_var_data.clone(), ev_var_data.clone(), ev_var_data.clone(), ev_var_data.clone(), ev_var_data.clone(), ev_var_data],
+            ev_propensity: VariableData {
+                weights: vec![1.0; 6],
+                counts: vec![1; 6]
+            },
             moves: VariableData {
                 weights: vec![1.0; Move::count() as usize],
                 counts: vec![1; Move::count() as usize]
@@ -154,9 +160,9 @@ impl TryFrom<PokeVarDataSerde<'_>> for PokeVarData {
         (0..6).into_iter().for_each(|stat| {
             for (&iv, &weight) in pvd_serde.ivs[stat].weights.iter() { poke_var_data.ivs[stat].weights[iv as usize] = weight; }
             for (&iv, &count) in pvd_serde.ivs[stat].counts.iter() { poke_var_data.ivs[stat].counts[iv as usize] = count; }
-            for (&ev, &weight) in pvd_serde.evs[stat].weights.iter() { poke_var_data.evs[stat].weights[ev as usize] = weight; }
-            for (&ev, &count) in pvd_serde.evs[stat].counts.iter() { poke_var_data.evs[stat].counts[ev as usize] = count; }
         });
+        for (&stat, &weight) in pvd_serde.ev_propensity.weights.iter() { poke_var_data.ev_propensity.weights[stat] = weight; }
+        for (&stat, &count) in pvd_serde.ev_propensity.counts.iter() { poke_var_data.ev_propensity.counts[stat] = count; }
         for (&move_, &weight) in pvd_serde.moves.weights.iter() { poke_var_data.moves.weights[Move::id_by_name(move_)? as usize] = weight; }
         for (&move_, &count) in pvd_serde.moves.counts.iter() { poke_var_data.moves.counts[Move::id_by_name(move_)? as usize] = count; }
         Ok(poke_var_data)
@@ -172,7 +178,7 @@ struct PokeVarDataSerde<'d> {
     #[serde(borrow)]
     ability: VariableDataSerde<&'d str>,
     ivs: Vec<VariableDataSerde<u8>>,
-    evs: Vec<VariableDataSerde<u8>>,
+    ev_propensity: VariableDataSerde<usize>,
     #[serde(borrow)]
     moves: VariableDataSerde<&'d str>
 }
@@ -200,10 +206,10 @@ impl From<PokeVarData> for PokeVarDataSerde<'_> {
                 weights: BTreeMap::from_iter(poke_var_data.ivs[stat].weights.iter().enumerate().map(|(id, &weight)| (id as u8, weight))),
                 counts: BTreeMap::from_iter(poke_var_data.ivs[stat].counts.iter().enumerate().map(|(id, &count)| (id as u8, count)))
             }).collect(),
-            evs: (0..6).into_iter().map(|stat| VariableDataSerde {
-                weights: BTreeMap::from_iter(poke_var_data.evs[stat].weights.iter().enumerate().map(|(id, &weight)| (id as u8, weight))),
-                counts: BTreeMap::from_iter(poke_var_data.evs[stat].counts.iter().enumerate().map(|(id, &count)| (id as u8, count)))
-            }).collect(),
+            ev_propensity: VariableDataSerde {
+                weights: BTreeMap::from_iter(poke_var_data.ev_propensity.weights.iter().copied().enumerate()),
+                counts: BTreeMap::from_iter(poke_var_data.ev_propensity.counts.iter().copied().enumerate())
+            },
             moves: VariableDataSerde {
                 weights: BTreeMap::from_iter(poke_var_data.moves.weights.iter().enumerate().map(|(id, &weight)| (Move::name(id as MoveID), weight))),
                 counts: BTreeMap::from_iter(poke_var_data.moves.counts.iter().enumerate().map(|(id, &count)| (Move::name(id as MoveID), count)))
@@ -302,7 +308,9 @@ impl Solver {
             poke_var_data.ability.add_fitness_sample(pokemon_build.ability() as usize, fitness_sample);
             for stat in 0..6 {
                 poke_var_data.ivs[stat].add_fitness_sample(pokemon_build.ivs()[stat] as usize, fitness_sample);
-                poke_var_data.evs[stat].add_fitness_sample(pokemon_build.evs()[stat] as usize, fitness_sample);
+                for _ in 0..pokemon_build.evs()[stat] {
+                    poke_var_data.ev_propensity.add_fitness_sample(stat, fitness_sample);
+                }
             }
             for &move_ in pokemon_build.moves() {
                 poke_var_data.moves.add_fitness_sample(move_ as usize, fitness_sample);
@@ -340,23 +348,13 @@ impl Solver {
             let abilities = Species::abilities(species);
             let ability_weights: Vec<f64> = abilities.iter().map(|&a| poke_var_data.ability.weights[a as usize]).collect();
 
-            let mut evs = [
-                cwip(&poke_var_data.evs[0].weights, rng) as u8,
-                cwip(&poke_var_data.evs[1].weights, rng) as u8,
-                cwip(&poke_var_data.evs[2].weights, rng) as u8,
-                cwip(&poke_var_data.evs[3].weights, rng) as u8,
-                cwip(&poke_var_data.evs[4].weights, rng) as u8,
-                cwip(&poke_var_data.evs[5].weights, rng) as u8
-            ];
-            while evs.iter().map(|&u| u as u16).sum::<u16>() != 510 {
-                evs = [
-                    cwip(&poke_var_data.evs[0].weights, rng) as u8,
-                    cwip(&poke_var_data.evs[1].weights, rng) as u8,
-                    cwip(&poke_var_data.evs[2].weights, rng) as u8,
-                    cwip(&poke_var_data.evs[3].weights, rng) as u8,
-                    cwip(&poke_var_data.evs[4].weights, rng) as u8,
-                    cwip(&poke_var_data.evs[5].weights, rng) as u8
-                ];
+            let mut evs = [0; 6];
+            for _ in 0..127 {
+                let mut stat = choose_weighted_index(&poke_var_data.ev_propensity.weights, rng);
+                while evs[stat] >= 252 {
+                    stat = choose_weighted_index(&poke_var_data.ev_propensity.weights, rng);
+                }
+                evs[stat] += 4;
             }
 
             let move_pool = Species::move_pool(species);
