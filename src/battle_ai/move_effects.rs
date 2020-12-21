@@ -156,6 +156,7 @@ pub enum MoveEffect {
     StdDamage(Type, u8, u8, u8),
     /// (stat_index: StatIndex, amount: i8)
     IncTargetStatStage(StatIndex, i8),
+    PoisonPowder,
     LeechSeed,
     Struggle
 }
@@ -169,6 +170,9 @@ impl MoveEffect {
             MoveEffect::IncTargetStatStage(stat_index, amount) => {
                 pokemon::increment_stat_stage(state, target_id, *stat_index, *amount);
                 EffectResult::Pass
+            },
+            MoveEffect::PoisonPowder => {
+                poison_powder(state, target_id)
             },
             MoveEffect::LeechSeed => {
                 leech_seed(state, user_id, target_id)
@@ -334,7 +338,7 @@ fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
                 }
                 EffectResult::Fail
             } else {
-                state.pokemon_by_id_mut(target_id).seeded_by = Some(user_id);
+                state.pokemon_by_id_mut(target_id).seeded_by = state.pokemon_by_id(user_id).field_position();
                 if cfg!(feature = "print-battle") {
                     let target_name = Species::name(state.pokemon_by_id(target_id).species());
                     state.add_display_text(format!("A seed was planted on {}!", target_name));
@@ -342,6 +346,22 @@ fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
                 EffectResult::Pass
             }
         }
+    }
+}
+
+/// Returns whether the battle has ended.
+fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
+    if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(target_id).species());
+            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
+        }
+        return EffectResult::Fail;
+    }
+    if pokemon::poison(state, target_id, false) {
+        EffectResult::Pass
+    } else {
+        EffectResult::Fail
     }
 }
 

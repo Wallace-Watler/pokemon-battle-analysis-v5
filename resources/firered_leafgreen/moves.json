@@ -26,6 +26,19 @@
         ]
     },
     {
+        "name": "Poison Powder",
+        "type": "Poison",
+        "category": "Status",
+        "accuracy": 75,
+        "targeting": "AllAdjacentPokemon",
+        "max_pp": 35,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "PoisonPowder"
+        ]
+    },
+    {
         "name": "Struggle",
         "type": "Normal",
         "category": "Physical",

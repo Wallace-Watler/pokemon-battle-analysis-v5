@@ -14,12 +14,12 @@
         "move_pool": [
             "Growl",
             "Leech Seed",
+            "Poison Powder",
             "Tackle",
             "Vine Whip"
         ],
         "_comments": [
             "TODO: Add the following moves",
-            "Poison Powder",
             "Sleep Powder",
             "Take Down",
             "Razor Leaf",

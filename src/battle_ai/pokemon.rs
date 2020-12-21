@@ -41,8 +41,8 @@ pub struct Pokemon {
     /// Turn on which confusion will be cured naturally.
     confusion_turn_will_cure: Option<u16>,
     is_flinching: bool,
-    /// ID of the Pokemon that seeded this Pokemon.
-    pub seeded_by: Option<u8>,
+    /// Position of the Pokemon that seeded this Pokemon.
+    pub seeded_by: Option<FieldPosition>,
     is_infatuated: bool,
     is_cursed: bool,
     has_nightmare: bool,
@@ -372,7 +372,7 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
                 None => { state.min_pokemon_id = Some(pokemon_id); }
                 Some(min_pokemon_id) => {
                     let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(min_pokemon_id)));
+                    panic!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(min_pokemon_id));
                 }
             }
         }
@@ -381,7 +381,7 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
                 None => { state.max_pokemon_id = Some(pokemon_id); }
                 Some(max_pokemon_id) => {
                     let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
-                    panic!(format!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(max_pokemon_id)));
+                    panic!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(max_pokemon_id));
                 }
             }
         }
@@ -410,19 +410,6 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
     if cfg!(feature = "print-battle") {
         let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
         state.add_display_text(format!("Removing {} from field position {:?}.", pokemon_display_text, old_field_pos));
-    }
-
-    if let Some(min_pokemon_id) = state.min_pokemon_id {
-        let min_pokemon = state.pokemon_by_id_mut(min_pokemon_id);
-        if let Some(seeder_id) = min_pokemon.seeded_by {
-            if seeder_id == pokemon_id { min_pokemon.seeded_by = None; }
-        }
-    }
-    if let Some(max_pokemon_id) = state.max_pokemon_id {
-        let max_pokemon = state.pokemon_by_id_mut(max_pokemon_id);
-        if let Some(seeder_id) = max_pokemon.seeded_by {
-            if seeder_id == pokemon_id { max_pokemon.seeded_by = None; }
-        }
     }
 
     if state.min_pokemon_id == Some(pokemon_id) {
@@ -458,6 +445,34 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
             _ => state.add_display_text(format!("{}'s {} rose drastically!", species_name, stat_index.name()))
         }
     }
+}
+
+/// Returns whether the poisoning was successful.
+pub fn poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
+    let pokemon = state.pokemon_by_id_mut(pokemon_id);
+
+    if !corrosion && (pokemon.is_type(Type::Poison) || pokemon.is_type(Type::Steel)) {
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
+        }
+        return false;
+    }
+
+    if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
+        pokemon.major_status_ailment = MajorStatusAilment::Poisoned;
+        pokemon.msa_counter = 0;
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+            state.add_display_text(format!("{} was poisoned!", species_name));
+        }
+        return true;
+    }
+
+    if cfg!(feature = "print-battle") {
+        state.add_display_text(String::from("But it failed!"));
+    }
+    false
 }
 
 pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {

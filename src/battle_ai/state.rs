@@ -411,16 +411,21 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
                 }
             }
 
-            if let Some(seeder_id) = state.pokemon[pokemon_id as usize].seeded_by {
-                if cfg!(feature = "print-battle") {
-                    let display_text = format!("{}'s seed drains energy from {}!", state.pokemon[pokemon_id as usize], state.pokemon[pokemon_id as usize]);
-                    state.add_display_text(display_text);
+            if let Some(seeder_pos) = state.pokemon[pokemon_id as usize].seeded_by {
+                let seeder_id = match seeder_pos {
+                    FieldPosition::Min => state.min_pokemon_id,
+                    FieldPosition::Max => state.max_pokemon_id
+                };
+                if let Some(seeder_id) = seeder_id {
+                    if cfg!(feature = "print-battle") {
+                        let display_text = format!("{}'s seed drains energy from {}!", state.pokemon[seeder_id as usize], state.pokemon[pokemon_id as usize]);
+                        state.add_display_text(display_text);
+                    }
+                    let transferred_hp = max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16;
+                    if pokemon::apply_damage(state, pokemon_id, transferred_hp) || pokemon::apply_damage(state, seeder_id, -transferred_hp) {
+                        return;
+                    }
                 }
-                let transferred_hp = max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16;
-                if pokemon::apply_damage(state, pokemon_id, transferred_hp) {
-                    return;
-                }
-                pokemon::apply_damage(state, seeder_id, -transferred_hp);
             }
         }
     }
