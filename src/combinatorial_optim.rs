@@ -241,7 +241,7 @@ impl Solver {
         &self.best_solutions
     }
 
-    pub fn do_iter(&mut self, p_cutoff: f64, refinement_iters: usize, rng: &mut StdRng) {
+    pub fn do_iter(&mut self, p_cutoff: f64, rng: &mut StdRng) {
         let chosen_team = self.random_team_build(rng);
         let fitness_sample = self.fitness_func(&chosen_team, rng);
 
@@ -257,40 +257,28 @@ impl Solver {
         if !chosen_team_has_solution {
             self.best_solutions.push(Solution {
                 fitness: fitness_sample,
-                fit_variance: f64::INFINITY,
+                fit_variance: 0.0,
                 num_samples: 1,
                 team_build: chosen_team
             });
         }
 
-        self.update_best_solutions(p_cutoff, refinement_iters, rng);
+        self.update_random_solution(p_cutoff, rng);
     }
 
-    /// Takes new samples for the known solutions until they have "enough". Does not explore new solutions.
-    pub fn refine_best_solutions(&mut self, p_cutoff: f64, refinement_iters: usize, rng: &mut StdRng) {
-        while self.best_solutions.iter().any(|bs| bs.num_samples < refinement_iters) {
-            self.update_best_solutions(p_cutoff, refinement_iters, rng);
+    /// Update one of the solutions, then remove any that are not likely to be better than the best solution.
+    fn update_random_solution(&mut self, p_cutoff: f64, rng: &mut StdRng) {
+        for i in 0..self.best_solutions.len() {
+            let fitness_sample = self.fitness_func(&self.best_solutions[i].team_build.clone(), rng);
+            self.best_solutions[i].update(fitness_sample);
         }
-    }
-
-    /// Update the solutions that haven't had enough refinement yet, then remove any that are not likely to be better than the best solution.
-    fn update_best_solutions(&mut self, p_cutoff: f64, refinement_iters: usize, rng: &mut StdRng) {
-        let mut fitness_samples = Vec::new();
-        let best_solutions = self.best_solutions.clone();
-        best_solutions.iter().enumerate()
-            .filter(|(_, bs)| bs.num_samples < refinement_iters)
-            .for_each(|(i, bs)| {
-                fitness_samples.push((i, self.fitness_func(&bs.team_build, rng)));
-            });
-        fitness_samples.iter().for_each(|(i, fs)| {
-            self.best_solutions[*i].update(*fs);
-        });
 
         self.best_solutions.sort_by(|bs1, bs2| {
             if bs1.fitness > bs2.fitness { return Ordering::Less }
             if bs1.fitness < bs2.fitness { return Ordering::Greater }
             Ordering::Equal
         });
+
         if let Some(best_of_the_best) = self.best_solutions.get(0).cloned() {
             self.best_solutions.retain(|bs| !bs.is_worse_than(&best_of_the_best, p_cutoff, rng));
         }
@@ -299,7 +287,8 @@ impl Solver {
     fn fitness_func(&mut self, maximizer: &TeamBuild, rng: &mut StdRng) -> f64 {
         self.fitness_func_evals += 1;
         // TODO: Let minimizer be specified in program input
-        let fitness_sample = (state::run_battle(&TeamBuild::new(rng), maximizer, rng) + 1.0) / 2.0;
+        let minimizer = self.random_team_build(rng);
+        let fitness_sample = (state::run_battle(&minimizer, maximizer, rng) + 1.0) / 2.0;
 
         let update_var_data_with_new_sample = |poke_var_data: &mut PokeVarData, pokemon_build: &PokemonBuild| {
             poke_var_data.species.add_fitness_sample(pokemon_build.species() as usize, fitness_sample);
@@ -329,20 +318,21 @@ impl Solver {
     fn random_team_build(&self, rng: &mut StdRng) -> TeamBuild {
         let mut used_species = HashSet::new();
 
-        let cwip = |weights: &[f64], rng: &mut StdRng| -> usize {
-            choose_weighted_index(&weights.iter().map(|&w| w.powf(1.0 / TeamBuild::num_vars() as f64)).collect::<Vec<f64>>(), rng)
-        };
+        // TODO: Maybe don't use this, probably making convergence too slow
+        //let cwip = |weights: &[f64], rng: &mut StdRng| -> usize {
+        //    choose_weighted_index(&weights.iter().map(|&w| w.powf(1.0 / TeamBuild::num_vars() as f64)).collect::<Vec<f64>>(), rng)
+        //};
 
         let mut random_pokemon_build = |poke_var_data: &PokeVarData, rng: &mut StdRng| -> PokemonBuild {
-            let mut species = cwip(&poke_var_data.species.weights, rng) as SpeciesID;
+            let mut species = choose_weighted_index(&poke_var_data.species.weights, rng) as SpeciesID;
             while used_species.contains(&species) {
-                species = cwip(&poke_var_data.species.weights, rng) as SpeciesID;
+                species = choose_weighted_index(&poke_var_data.species.weights, rng) as SpeciesID;
             }
             if !Species::allow_duplicates(species) { used_species.insert(species); }
 
-            let mut gender = Gender::by_id(cwip(&poke_var_data.gender.weights, rng) as u8);
+            let mut gender = Gender::by_id(choose_weighted_index(&poke_var_data.gender.weights, rng) as u8);
             while !Species::can_be_gender(species, gender) {
-                gender = Gender::by_id(cwip(&poke_var_data.gender.weights, rng) as u8);
+                gender = Gender::by_id(choose_weighted_index(&poke_var_data.gender.weights, rng) as u8);
             }
 
             let abilities = Species::abilities(species);
@@ -361,21 +351,21 @@ impl Solver {
             let move_weights: Vec<f64> = move_pool.iter().map(|&m| poke_var_data.moves.weights[m as usize]).collect();
             let mut moves= BTreeSet::new();
             while moves.len() < min(4, move_pool.len()) {
-                moves.insert(move_pool[cwip(&move_weights, rng)]);
+                moves.insert(move_pool[choose_weighted_index(&move_weights, rng)]);
             }
 
             PokemonBuild {
                 species,
                 gender,
-                nature: Nature::by_id(cwip(&poke_var_data.nature.weights, rng) as u8),
-                ability: abilities[cwip(&ability_weights, rng)],
+                nature: Nature::by_id(choose_weighted_index(&poke_var_data.nature.weights, rng) as u8),
+                ability: abilities[choose_weighted_index(&ability_weights, rng)],
                 ivs: [
-                    cwip(&poke_var_data.ivs[0].weights, rng) as u8,
-                    cwip(&poke_var_data.ivs[1].weights, rng) as u8,
-                    cwip(&poke_var_data.ivs[2].weights, rng) as u8,
-                    cwip(&poke_var_data.ivs[3].weights, rng) as u8,
-                    cwip(&poke_var_data.ivs[4].weights, rng) as u8,
-                    cwip(&poke_var_data.ivs[5].weights, rng) as u8
+                    choose_weighted_index(&poke_var_data.ivs[0].weights, rng) as u8,
+                    choose_weighted_index(&poke_var_data.ivs[1].weights, rng) as u8,
+                    choose_weighted_index(&poke_var_data.ivs[2].weights, rng) as u8,
+                    choose_weighted_index(&poke_var_data.ivs[3].weights, rng) as u8,
+                    choose_weighted_index(&poke_var_data.ivs[4].weights, rng) as u8,
+                    choose_weighted_index(&poke_var_data.ivs[5].weights, rng) as u8
                 ],
                 evs,
                 moves

@@ -38,7 +38,7 @@ fn main() {
     loop {
         println!("{}", i);
         i += 1;
-        solver.do_iter(0.99, 30, &mut rng);
+        solver.do_iter(0.99, &mut rng);
         fs::write("solver.json", serde_json::to_string_pretty(&solver).unwrap()).unwrap();
 
         let pb_header = "species,gender,nature,ability,iv_1,iv_2,iv_3,iv_4,iv_5,iv_6,ev_1,ev_2,ev_3,ev_4,ev_5,ev_6,move_1,move_2,move_3,move_4";
