@@ -120,14 +120,9 @@ impl Species {
         move_set
     }
 
-    pub fn can_be_gender(species: SpeciesID, gender: Gender) -> bool {
-        let female_chance = Species::by_id(species).female_chance;
-        let male_chance = Species::by_id(species).male_chance;
-        match gender {
-            Gender::Female => female_chance > 0,
-            Gender::Male => male_chance > 0,
-            Gender::None => female_chance + male_chance < 1000
-        }
+    pub fn has_male_and_female(species: SpeciesID) -> bool {
+        let s = Species::by_id(species);
+        s.female_chance > 0 && s.male_chance > 0
     }
 }
 

@@ -97,16 +97,16 @@ impl State {
 /// 0.0 would be a tie. The minimizer's value is its negation.
 pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng) -> f64 {
     let mut state = State::new({
-        let mut min_team = minimizer.remaining_team.iter();
-        let mut max_team = maximizer.remaining_team.iter();
+        let mut min_team = minimizer.members.iter();
+        let mut max_team = maximizer.members.iter();
         [
-            Pokemon::from(&minimizer.party_leader),
             Pokemon::from(min_team.next().unwrap()),
             Pokemon::from(min_team.next().unwrap()),
             Pokemon::from(min_team.next().unwrap()),
             Pokemon::from(min_team.next().unwrap()),
             Pokemon::from(min_team.next().unwrap()),
-            Pokemon::from(&maximizer.party_leader),
+            Pokemon::from(min_team.next().unwrap()),
+            Pokemon::from(max_team.next().unwrap()),
             Pokemon::from(max_team.next().unwrap()),
             Pokemon::from(max_team.next().unwrap()),
             Pokemon::from(max_team.next().unwrap()),

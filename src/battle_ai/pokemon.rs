@@ -1,12 +1,10 @@
-use rand::prelude::StdRng;
+use rand::prelude::{StdRng, SliceRandom};
 use rand::Rng;
 use serde::export::TryFrom;
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
-use std::collections::BTreeSet;
-use std::iter::FromIterator;
-use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, clamp};
+use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, clamp, choose_weighted_index};
 use crate::species::{SpeciesID, Species};
 use crate::battle_ai::move_effects::Action;
 use crate::move_::{MoveID, Move};
@@ -155,7 +153,7 @@ impl Display for Pokemon {
 }
 
 /// Part of a `TeamBuild`; contains all the necessary information to create a `Pokemon` object.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(try_from = "PokemonBuildSerde", into = "PokemonBuildSerde")]
 pub struct PokemonBuild {
     pub species: SpeciesID,
@@ -163,9 +161,13 @@ pub struct PokemonBuild {
     pub nature: Nature,
     pub ability: AbilityID,
     pub ivs: [u8; 6],
+    /// EVs are assigned as 127 groups of 4 points each, totaling 508 points. This is two less than
+    /// the actual limit of 510, but the extra two points are wasted anyways due to how stats are
+    /// calculated. Furthermore, restricting the EVs to multiples of 4 reduces the number of
+    /// possible team builds by a factor of ~778 quadrillion.
     pub evs: [u8; 6],
-    /// Contains 0-4 moves.
-    pub moves: BTreeSet<MoveID>
+    /// Contains 1-4 moves.
+    pub moves: Vec<MoveID>
 }
 
 impl PokemonBuild {
@@ -174,18 +176,33 @@ impl PokemonBuild {
     }
 
     pub fn new(rng: &mut StdRng) -> PokemonBuild {
+        let mut evs = [0; 6];
+        let mut ev_sum = 0;
+        while ev_sum < 508 {
+            let i = rng.gen_range(0, 6);
+            if evs[i] < 252 {
+                evs[i] += 4;
+                ev_sum += 4;
+            }
+        }
+
         let species = Species::random_species(rng);
-        let mut pokemon_build = PokemonBuild {
+        PokemonBuild {
             species,
             gender: Species::random_gender(species, rng),
             nature: Nature::random_nature(rng),
             ability: Species::random_ability(species, rng),
-            ivs: [rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32), rng.gen_range(0, 32)],
-            evs: [rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253), rng.gen_range(0, 253)],
-            moves: BTreeSet::from_iter(Species::random_move_set(species, rng)),
-        };
-        pokemon_build.fix_evs(rng);
-        pokemon_build
+            ivs: [
+                rng.gen_range(0, 32),
+                rng.gen_range(0, 32),
+                rng.gen_range(0, 32),
+                rng.gen_range(0, 32),
+                rng.gen_range(0, 32),
+                rng.gen_range(0, 32)
+            ],
+            evs,
+            moves: Species::random_move_set(species, rng),
+        }
     }
 
     pub const fn species(&self) -> SpeciesID {
@@ -212,26 +229,24 @@ impl PokemonBuild {
         &self.evs
     }
 
-    pub fn moves(&self) -> &BTreeSet<MoveID> {
+    pub fn moves(&self) -> &[MoveID] {
         &self.moves
     }
+}
 
-    fn fix_evs(&mut self, rng: &mut StdRng) {
-        let mut ev_sum: u16 = self.evs.iter().map(|ev| *ev as u16).sum();
-        while ev_sum < 510 {
-            let i = rng.gen_range(0, 6);
-            if self.evs[i] < 252 {
-                self.evs[i] += 1;
-                ev_sum += 1;
+impl PartialEq for PokemonBuild {
+    fn eq(&self, other: &Self) -> bool {
+        for move_ in &self.moves {
+            if !other.moves.contains(move_) {
+                return false;
             }
         }
-        while ev_sum > 510 {
-            let i = rng.gen_range(0, 6);
-            if self.evs[i] > 0 {
-                self.evs[i] -= 1;
-                ev_sum -= 1;
-            }
-        }
+        self.species == other.species
+            && self.gender == other.gender
+            && self.nature == other.nature
+            && self.ability == other.ability
+            && self.ivs == other.ivs
+            && self.evs == other.evs
     }
 }
 
@@ -246,12 +261,12 @@ impl TryFrom<PokemonBuildSerde<'_>> for PokemonBuild {
             ability: Ability::id_by_name(pb_serde.ability)?,
             ivs: pb_serde.ivs,
             evs: pb_serde.evs,
-            moves: BTreeSet::from_iter(vec![
+            moves: vec![
                 Move::id_by_name(pb_serde.move1)?,
                 Move::id_by_name(pb_serde.move2)?,
                 Move::id_by_name(pb_serde.move3)?,
                 Move::id_by_name(pb_serde.move4)?
-            ])
+            ]
         })
     }
 }
@@ -288,13 +303,9 @@ impl From<PokemonBuild> for PokemonBuildSerde<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Deserialize, Serialize)]
 pub struct TeamBuild {
-    /// The party leader is separate since they are always the first Pokemon sent out.
-    /// The rest of the team can be freely switched in and out of battle.
-    pub party_leader: PokemonBuild,
-    /// Contains the rest of the team.
-    pub remaining_team: [PokemonBuild; 5]
+    pub members: [PokemonBuild; 6]
 }
 
 impl TeamBuild {
@@ -303,16 +314,130 @@ impl TeamBuild {
     }
 
     pub fn new(rng: &mut StdRng) -> TeamBuild {
+        let mut non_duplicates = Vec::new();
+        let mut new_member = || -> PokemonBuild {
+            let mut result = PokemonBuild::new(rng);
+            while non_duplicates.contains(&result.species) {
+                result = PokemonBuild::new(rng);
+            }
+            if !Species::allow_duplicates(result.species) {
+                non_duplicates.push(result.species);
+            }
+            result
+        };
+
         TeamBuild {
-            party_leader: PokemonBuild::new(rng),
-            remaining_team: [
-                PokemonBuild::new(rng),
-                PokemonBuild::new(rng),
-                PokemonBuild::new(rng),
-                PokemonBuild::new(rng),
-                PokemonBuild::new(rng)
+            members: [
+                new_member(),
+                new_member(),
+                new_member(),
+                new_member(),
+                new_member(),
+                new_member()
             ]
         }
+    }
+
+    pub fn mutated_child(&self, rng: &mut StdRng) -> TeamBuild {
+        let member_num = rng.gen_range(0, 6);
+        let build_to_mutate = &self.members[member_num];
+
+        // Each variable's mutation rate is proportional to the number of other choices for that variable.
+        let mutation_rates = [
+            (
+                Species::count() as usize - 1
+                - self.members.iter().filter(|b| !Species::allow_duplicates(b.species)).count()
+                + if !Species::allow_duplicates(build_to_mutate.species) { 1 } else { 0 }
+            ) as f64,
+            if Species::has_male_and_female(build_to_mutate.species) { 1.0 } else { 0.0 },
+            24.0,
+            (Species::abilities(build_to_mutate.species).len() - 1) as f64,
+            31.0 * 6.0,
+            30.0 + 30.0,
+            {
+                let p = Species::move_pool(build_to_mutate.species).len();
+                let m = build_to_mutate.moves.len();
+                ((p - m) * m) as f64
+            }
+        ];
+
+        let mut child = self.clone();
+        let mut child_build = &mut child.members[member_num];
+        match choose_weighted_index(&mutation_rates, rng) {
+            0 => {
+                while build_to_mutate.species == child_build.species || (!Species::allow_duplicates(child_build.species) && self.members.iter().any(|b| b.species == child_build.species)) {
+                    child_build.species = Species::random_species(rng);
+                }
+                child_build.gender = Species::random_gender(child_build.species, rng);
+                child_build.ability = Species::random_ability(child_build.species, rng);
+                child_build.moves = Species::random_move_set(child_build.species, rng);
+            },
+            1 => child_build.gender = child_build.gender.opposite(),
+            2 => {
+                let old_nature = child_build.nature;
+                while child_build.nature == old_nature {
+                    child_build.nature = Nature::random_nature(rng);
+                }
+            },
+            3 => {
+                let old_ability = child_build.ability;
+                while child_build.ability == old_ability {
+                    child_build.ability = Species::random_ability(child_build.species, rng);
+                }
+            },
+            4 => {
+                let i = rng.gen_range(0, 6);
+                let old_iv = child_build.ivs[i];
+                while child_build.ivs[i] == old_iv {
+                    child_build.ivs[i] = rng.gen_range(0, 32);
+                }
+            },
+            5 => {
+                if rng.gen_bool(0.5) {
+                    let i = rng.gen_range(0, 6);
+                    let mut j = rng.gen_range(0, 6);
+                    while j == i {
+                        j = rng.gen_range(0, 6);
+                    }
+                    child_build.evs.swap(i, j);
+                } else {
+                    let mut from = rng.gen_range(0, 6);
+                    while child_build.evs[from] < 4 {
+                        from = rng.gen_range(0, 6);
+                    }
+                    let mut to = rng.gen_range(0, 6);
+                    while to == from || child_build.evs[to] >= 252 {
+                        to = rng.gen_range(0, 6);
+                    }
+                    child_build.evs[from] -= 4;
+                    child_build.evs[to] += 4;
+                }
+            },
+            _ => {
+                let move_pool = Species::move_pool(child_build.species);
+                let mut new_move = move_pool.choose(rng).unwrap();
+                while child_build.moves.contains(new_move) {
+                    new_move = move_pool.choose(rng).unwrap();
+                }
+                *child_build.moves.choose_mut(rng).unwrap() = *new_move;
+            }
+        }
+        child
+    }
+}
+
+impl PartialEq for TeamBuild {
+    fn eq(&self, other: &Self) -> bool {
+        // Two teams are equal if their party leaders are equal and the rest of their team members
+        // are found on both teams, in any order. The party leader is separate since they are always
+        // the first Pokemon sent out. The rest of the team can be freely switched in and out of
+        // battle.
+        for team_member in self.members[1..6].iter() {
+            if !other.members[1..6].contains(team_member) {
+                return false;
+            }
+        }
+        self.members[0] == other.members[0]
     }
 }
 

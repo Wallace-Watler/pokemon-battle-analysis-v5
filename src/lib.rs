@@ -171,10 +171,6 @@ struct Ability {
 }
 
 impl Ability {
-    const fn count() -> AbilityID {
-        ABILITIES.len() as AbilityID
-    }
-
     fn id_by_name(name: &str) -> Result<AbilityID, String> {
         for (ability_id, ability) in ABILITIES.iter().enumerate() {
             if ability.name.eq_ignore_ascii_case(name) {
@@ -257,32 +253,19 @@ pub enum Gender {
 }
 
 impl Gender {
-    const fn count() -> u8 {
-        3
-    }
-
-    const fn id(&self) -> u8 {
-        match self {
-            Gender::Female => 0,
-            Gender::Male => 1,
-            Gender::None => 2
-        }
-    }
-
-    fn by_id(id: u8) -> Gender {
-        match id {
-            0 => Gender::Female,
-            1 => Gender::Male,
-            2 => Gender::None,
-            _ => panic!("No gender with id '{}'", id)
-        }
-    }
-
     const fn symbol(&self) -> &'static str {
         match self {
             Gender::Female => "♀",
             Gender::Male => "♂",
             Gender::None => ""
+        }
+    }
+
+    const fn opposite(&self) -> Gender {
+        match self {
+            Gender::Female => Gender::Male,
+            Gender::Male => Gender::Female,
+            Gender::None => Gender::None
         }
     }
 }
@@ -356,71 +339,6 @@ pub enum Nature {
 }
 
 impl Nature {
-    const fn count() -> u8 {
-        25
-    }
-
-    const fn id(&self) -> u8 {
-        match self {
-            Nature::Adamant => 0,
-            Nature::Bashful => 1,
-            Nature::Bold => 2,
-            Nature::Brave => 3,
-            Nature::Calm => 4,
-            Nature::Careful => 5,
-            Nature::Docile => 6,
-            Nature::Gentle => 7,
-            Nature::Hardy => 8,
-            Nature::Hasty => 9,
-            Nature::Impish => 10,
-            Nature::Jolly => 11,
-            Nature::Lax => 12,
-            Nature::Lonely => 13,
-            Nature::Mild => 14,
-            Nature::Modest => 15,
-            Nature::Naive => 16,
-            Nature::Naughty => 17,
-            Nature::Quiet => 18,
-            Nature::Quirky => 19,
-            Nature::Rash => 20,
-            Nature::Relaxed => 21,
-            Nature::Sassy => 22,
-            Nature::Serious => 23,
-            Nature::Timid => 24
-        }
-    }
-
-    fn by_id(id: u8) -> Nature {
-        match id {
-            0 => Nature::Adamant,
-            1 => Nature::Bashful,
-            2 => Nature::Bold,
-            3 => Nature::Brave,
-            4 => Nature::Calm,
-            5 => Nature::Careful,
-            6 => Nature::Docile,
-            7 => Nature::Gentle,
-            8 => Nature::Hardy,
-            9 => Nature::Hasty,
-            10 => Nature::Impish,
-            11 => Nature::Jolly,
-            12 => Nature::Lax,
-            13 => Nature::Lonely,
-            14 => Nature::Mild,
-            15 => Nature::Modest,
-            16 => Nature::Naive,
-            17 => Nature::Naughty,
-            18 => Nature::Quiet,
-            19 => Nature::Quirky,
-            20 => Nature::Rash,
-            21 => Nature::Relaxed,
-            22 => Nature::Sassy,
-            23 => Nature::Serious,
-            24 => Nature::Timid,
-            _ => panic!("No nature with id '{}'", id)
-        }
-    }
-
     fn random_nature(rng: &mut StdRng) -> Nature {
         unsafe {
             transmute::<u8, Nature>(rng.gen_range(0, 25))
