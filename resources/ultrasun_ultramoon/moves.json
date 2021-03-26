@@ -1,3 +1,158 @@
 [
-
+    {
+        "name": "Growl",
+        "type": "Normal",
+        "category": "Status",
+        "accuracy": { "Standard": 100 },
+        "targeting": "AllAdjacentOpponents",
+        "max_pp": 40,
+        "priority_stage": 0,
+        "sound_based": true,
+        "effects": [
+            { "IncTargetStatStage": ["Atk", -1] }
+        ]
+    },
+    {
+        "name": "Growth",
+        "type": "Normal",
+        "category": "Status",
+        "accuracy": "Ignore",
+        "targeting": "User",
+        "max_pp": 20,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "Growth"
+        ]
+    },
+    {
+        "name": "Leech Seed",
+        "type": "Grass",
+        "category": "Status",
+        "accuracy": { "Standard": 90 },
+        "targeting": "SingleAdjacentOpponent",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "LeechSeed"
+        ]
+    },
+    {
+        "name": "Poison Powder",
+        "type": "Poison",
+        "category": "Status",
+        "accuracy": { "Standard": 75 },
+        "targeting": "AllAdjacentPokemon",
+        "max_pp": 35,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "PoisonPowder"
+        ]
+    },
+    {
+        "name": "Razor Leaf",
+        "type": "Grass",
+        "category": "Physical",
+        "accuracy": { "Standard": 95 },
+        "targeting": "AllAdjacentOpponents",
+        "max_pp": 25,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "StdDamage": ["Grass", 55, 1, 0] }
+        ]
+    },
+    {
+        "name": "Sleep Powder",
+        "type": "Grass",
+        "category": "Status",
+        "accuracy": { "Standard": 75 },
+        "targeting": "AllAdjacentPokemon",
+        "max_pp": 15,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "SleepPowder"
+        ]
+    },
+    {
+        "name": "Struggle",
+        "type": "Normal",
+        "category": "Physical",
+        "accuracy": "Ignore",
+        "targeting": "RandomOpponent",
+        "max_pp": 1,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "Struggle"
+        ]
+    },
+    {
+        "name": "Sweet Scent",
+        "type": "Normal",
+        "category": "Status",
+        "accuracy": { "Standard": 100 },
+        "targeting": "AllAdjacentOpponents",
+        "max_pp": 20,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "IncTargetStatStage": ["Eva", -2] }
+        ]
+    },
+    {
+        "name": "Synthesis",
+        "type": "Grass",
+        "category": "Status",
+        "accuracy": "Ignore",
+        "targeting": "User",
+        "max_pp": 5,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "Synthesis"
+        ]
+    },
+    {
+        "name": "Tackle",
+        "type": "Normal",
+        "category": "Physical",
+        "accuracy": { "Standard": 100 },
+        "targeting": "SingleAdjacentPokemon",
+        "max_pp": 35,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "StdDamage": ["Normal", 40, 0, 0] }
+        ]
+    },
+    {
+        "name": "Toxic",
+        "type": "Poison",
+        "category": "Status",
+        "accuracy": "Toxic",
+        "targeting": "SingleAdjacentPokemon",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "Toxic"
+        ]
+    },
+    {
+        "name": "Vine Whip",
+        "type": "Grass",
+        "category": "Physical",
+        "accuracy": { "Standard": 100 },
+        "targeting": "SingleAdjacentOpponent",
+        "max_pp": 25,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "StdDamage": ["Grass", 45, 0, 0] }
+        ]
+    }
 ]

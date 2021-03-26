@@ -47,6 +47,7 @@ impl Solution {
 
     /// Returns the probability that this solution performs worse than `other`.
     fn prob_worse_than(&self, other: &Solution, rng: &mut StdRng) -> f64 {
+        // TODO: Use normal dist if num_samples > 30 for both solutions, and store t dists 1 - 29
         let t_dist_1 = StudentT::new((self.num_samples - 1) as f64).unwrap();
         let t_dist_2 = StudentT::new((other.num_samples - 1) as f64).unwrap();
 
@@ -74,8 +75,8 @@ impl Solver {
     pub fn new(rng: &mut StdRng) -> Solver {
         Solver {
             fitness_func_evals: 0,
-            maximizer_meta: iter::repeat_with(|| Solution::new(rng)).take(10).collect(),
-            minimizer_meta: iter::repeat_with(|| Solution::new(rng)).take(10).collect()
+            maximizer_meta: iter::repeat_with(|| Solution::new(rng)).take(100).collect(),
+            minimizer_meta: iter::repeat_with(|| Solution::new(rng)).take(100).collect()
         }
     }
 
@@ -87,7 +88,7 @@ impl Solver {
         &self.minimizer_meta
     }
 
-    pub fn do_iter(&mut self, p_cutoff: f64, rng: &mut StdRng) {
+    pub fn do_iter(&mut self, rng: &mut StdRng) {
         // Evaluate solutions in one meta against those in the other, updating their fitnesses.
         let interaction_chance = 1.0 / ((self.maximizer_meta.len() * self.minimizer_meta.len()) as f64).sqrt();
         for max_sol in self.maximizer_meta.iter_mut() {
@@ -101,11 +102,11 @@ impl Solver {
             }
         }
 
-        Solver::update_meta(&mut self.maximizer_meta, p_cutoff, rng);
-        Solver::update_meta(&mut self.minimizer_meta, p_cutoff, rng);
+        Solver::update_meta(&mut self.maximizer_meta, rng);
+        Solver::update_meta(&mut self.minimizer_meta, rng);
     }
 
-    fn update_meta(meta: &mut Vec<Solution>, p_cutoff: f64, rng: &mut StdRng) {
+    fn update_meta(meta: &mut Vec<Solution>, rng: &mut StdRng) {
         let num_sols = meta.len();
 
         // Each solution may create a child according to its probability of performing better than the best solution.
@@ -134,6 +135,7 @@ impl Solver {
         }
 
         // Remove solutions that are not likely to be better than the best solution.
+        let p_cutoff = meta[0].fitness / 4.0 + 0.75;
         meta.retain(|sol| sol.prob_worse_than_best < p_cutoff);
     }
 }

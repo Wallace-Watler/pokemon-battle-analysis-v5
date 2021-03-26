@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::fmt::Debug;
 use std::fs;
 use crate::{Type, FieldPosition, game_version};
-use crate::battle_ai::move_effects::MoveEffect;
+use crate::battle_ai::move_effects::{MoveEffect, MoveAccuracy};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum MoveCategory {
@@ -71,8 +71,7 @@ pub struct Move {
     #[serde(rename = "type")]
     type_: Type,
     category: MoveCategory,
-    /// An accuracy of 0 means this move ignores accuracy checks and will always hit.
-    accuracy: u8,
+    accuracy: MoveAccuracy,
     targeting: MoveTargeting,
     max_pp: u8,
     priority_stage: i8,
@@ -117,8 +116,8 @@ impl Move {
         category
     }
 
-    pub fn accuracy(move_: MoveID) -> u8 {
-        Move::by_id(move_).accuracy
+    pub fn accuracy(move_: MoveID) -> &'static MoveAccuracy {
+        &Move::by_id(move_).accuracy
     }
 
     pub fn targeting(move_: MoveID) -> MoveTargeting {

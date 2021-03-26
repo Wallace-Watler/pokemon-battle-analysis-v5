@@ -10,6 +10,7 @@ use crate::battle_ai::move_effects::Action;
 use crate::move_::{MoveID, Move};
 use crate::battle_ai::state::State;
 
+// TODO: Store species, gender, nature, ivs, and evs separately since they never change during a battle?
 #[derive(Clone, Debug)]
 /// Assumed to be level 100.
 pub struct Pokemon {
@@ -82,6 +83,10 @@ impl Pokemon {
 
     pub const fn major_status_ailment(&self) -> MajorStatusAilment {
         self.major_status_ailment
+    }
+
+    pub const fn msa_counter(&self) -> u16 {
+        self.msa_counter
     }
 
     pub const fn field_position(&self) -> Option<FieldPosition> {
@@ -590,6 +595,54 @@ pub fn poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
             state.add_display_text(format!("{} was poisoned!", species_name));
+        }
+        return true;
+    }
+
+    if cfg!(feature = "print-battle") {
+        state.add_display_text(String::from("But it failed!"));
+    }
+    false
+}
+
+/// Returns whether the poisoning was successful.
+pub fn badly_poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
+    let pokemon = state.pokemon_by_id_mut(pokemon_id);
+
+    if !corrosion && (pokemon.is_type(Type::Poison) || pokemon.is_type(Type::Steel)) {
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
+        }
+        return false;
+    }
+
+    if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
+        pokemon.major_status_ailment = MajorStatusAilment::BadlyPoisoned;
+        pokemon.msa_counter = 0;
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+            state.add_display_text(format!("{} was badly poisoned!", species_name));
+        }
+        return true;
+    }
+
+    if cfg!(feature = "print-battle") {
+        state.add_display_text(String::from("But it failed!"));
+    }
+    false
+}
+
+/// Returns whether the Pokemon fell asleep.
+pub fn put_to_sleep(state: &mut State, pokemon_id: u8) -> bool {
+    let pokemon = state.pokemon_by_id_mut(pokemon_id);
+
+    if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
+        pokemon.major_status_ailment = MajorStatusAilment::Asleep;
+        pokemon.msa_counter = 0;
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+            state.add_display_text(format!("{} fell asleep!", species_name));
         }
         return true;
     }

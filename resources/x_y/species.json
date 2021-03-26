@@ -4,6 +4,7 @@
         "type1": "Grass",
         "type2": "Poison",
         "abilities": [
+            "Chlorophyll",
             "Overgrow"
         ],
         "base_stats": [45, 49, 49, 65, 65, 45],
@@ -13,23 +14,23 @@
         "allow_duplicates": true,
         "move_pool": [
             "Growl",
+            "Growth",
             "Leech Seed",
             "Poison Powder",
+            "Razor Leaf",
+            "Sleep Powder",
+            "Sweet Scent",
+            "Synthesis",
             "Tackle",
+            "Toxic",
             "Vine Whip"
         ],
         "_comments": [
             "TODO: Add the following moves",
-            "Sleep Powder",
             "Take Down",
-            "Razor Leaf",
-            "Sweet Scent",
-            "Growth",
             "Double-Edge",
             "Worry Seed",
-            "Synthesis",
             "Seed Bomb",
-            "Toxic",
             "Venoshock",
             "Hidden Power",
             "Sunny Day",

@@ -4,11 +4,13 @@ use std::cmp::{max, min, Ordering};
 use crate::battle_ai::{game_theory, pokemon};
 use crate::{FieldPosition, Weather, Terrain, choose_weighted_index, MajorStatusAilment};
 use crate::battle_ai::move_effects::Action;
-use crate::move_::Move;
+use crate::move_::{Move, MoveCategory};
 use crate::battle_ai::pokemon::{Pokemon, TeamBuild};
 use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix};
 
 const AI_LEVEL: u8 = 3;
+
+pub static mut NUM_STATE_COPIES: usize = 0;
 
 /// Represents the entire game state of a battle.
 #[derive(Debug)]
@@ -69,6 +71,7 @@ impl State {
 
     /// Copies only the game state into a new State instance; doesn't copy the child matrix or display text.
     fn copy_game_state(&self) -> State {
+        unsafe { NUM_STATE_COPIES += 1; }
         State {
             pokemon: self.pokemon.clone(),
             min_pokemon_id: self.min_pokemon_id,
@@ -122,7 +125,7 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
 
     let mut nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
 
-    while !state.children.is_empty() {
+    while !nash_eq.min_player_strategy.is_empty() && !nash_eq.max_player_strategy.is_empty() {
         let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
         let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
 
@@ -136,6 +139,7 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE END >>>>");
     }
+
     nash_eq.expected_payoff
 }
 
@@ -236,7 +240,9 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                         state.num_maximizer_actions = 1;
                         state.num_minimizer_actions = choices.len();
                     } else { // Only maximizer must choose
-                        let choices: Vec<u8> = (6..12).filter(|id| state.pokemon[*id as usize].current_hp() > 0).collect();
+                        let choices: Vec<u8> = (6..12)
+                            .filter(|id| state.pokemon[*id as usize].current_hp() > 0)
+                            .collect();
                         for choice in &choices {
                             let mut child = state.copy_game_state();
                             pokemon::add_to_field(&mut child, *choice, FieldPosition::Max);
@@ -274,13 +280,13 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
             let mut generate_actions = |user_id: u8| -> Vec<Action> {
                 let mut actions: Vec<Action> = Vec::with_capacity(9);
 
-                if let Some(next_move_action) = state.pokemon[user_id as usize].next_move_action.clone() { // TODO: Is this actually what should happen?
+                if let Some(next_move_action) = state.pokemon_by_id(user_id).next_move_action.clone() { // TODO: Is this actually what should happen?
                     if next_move_action.can_be_performed(state, rng) {
                         actions.push(next_move_action);
-                        state.pokemon[user_id as usize].next_move_action = None;
+                        state.pokemon_by_id_mut(user_id).next_move_action = None;
                         return actions;
                     } else {
-                        state.pokemon[user_id as usize].next_move_action = None;
+                        state.pokemon_by_id_mut(user_id).next_move_action = None;
                     }
                 }
 
@@ -310,7 +316,6 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
                     });
                 }
 
-                // TODO: It doesn't help much to check switch actions every turn; maybe have a flag to signal when a check should be made?
                 for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
                     let team_member = state.pokemon_by_id(team_member_id);
                     if team_member.current_hp() > 0 && team_member.field_position() == None && team_member.known_moves().iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
@@ -345,7 +350,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
 }
 
 // TODO: Make better; order actions so that pruning is most likely to occur.
-fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Ordering {
+fn action_comparator(act1: &Action, act2: &Action, played_in: &State) -> Ordering {
     match act1 {
         Action::Switch { .. } => {
             match act2 {
@@ -353,20 +358,24 @@ fn action_comparator(act1: &Action, act2: &Action, _played_in: &State) -> Orderi
                 Action::Move { .. } => Ordering::Greater
             }
         },
-        Action::Move {user_id: _, move_: act1_move_id, move_index: _, target_positions: _} => {
+        Action::Move {user_id: _, move_: act1_move, move_index: _, target_positions: _} => {
             match act2 {
                 Action::Switch { .. } => Ordering::Less,
-                Action::Move {user_id: _, move_: act2_move_id, move_index: _, target_positions: _} => {
-                    if *act1_move_id == Move::id_by_name("Tackle").unwrap() && *act2_move_id == Move::id_by_name("Tackle").unwrap() { return Ordering::Equal; }
-                    if *act1_move_id == Move::id_by_name("Tackle").unwrap() && *act2_move_id != Move::id_by_name("Tackle").unwrap() { return Ordering::Less; }
-                    if *act1_move_id != Move::id_by_name("Tackle").unwrap() && *act2_move_id == Move::id_by_name("Tackle").unwrap() { return Ordering::Greater; }
-                    if *act1_move_id == Move::id_by_name("Growl").unwrap() && *act2_move_id == Move::id_by_name("Growl").unwrap() { return Ordering::Equal; }
-                    if *act1_move_id == Move::id_by_name("Growl").unwrap() && *act2_move_id != Move::id_by_name("Growl").unwrap() { return Ordering::Less; }
-                    if *act1_move_id != Move::id_by_name("Growl").unwrap() && *act2_move_id == Move::id_by_name("Growl").unwrap() { return Ordering::Greater; }
-                    if *act1_move_id == Move::id_by_name("Vine Whip").unwrap() && *act2_move_id == Move::id_by_name("Vine Whip").unwrap() { return Ordering::Equal; }
-                    if *act1_move_id == Move::id_by_name("Vine Whip").unwrap() && *act2_move_id != Move::id_by_name("Vine Whip").unwrap() { return Ordering::Less; }
-                    if *act1_move_id != Move::id_by_name("Vine Whip").unwrap() && *act2_move_id == Move::id_by_name("Vine Whip").unwrap() { return Ordering::Greater; }
-                    Ordering::Equal
+                Action::Move {user_id: _, move_: act2_move, move_index: _, target_positions: _} => {
+                    match Move::category(*act1_move) {
+                        MoveCategory::Status => {
+                            match Move::category(*act2_move) {
+                                MoveCategory::Status => Ordering::Equal,
+                                _ => Ordering::Greater
+                            }
+                        },
+                        _ => {
+                            match Move::category(*act2_move) {
+                                MoveCategory::Status => Ordering::Less,
+                                _ => Ordering::Equal
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -380,13 +389,16 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
         state.add_display_text(format!("---- Turn {} ----", turn_number));
     }
 
+    for id in 0..12 {
+        pokemon::increment_msa_counter(state, id);
+    }
+
     if action_queue.len() == 2 && action_queue[1].outspeeds(state, action_queue[0], rng) {
         action_queue.swap(0, 1);
     }
 
     while !action_queue.is_empty() {
         let action = action_queue.remove(0);
-        action.pre_action_stuff(state);
         if action.can_be_performed(state, rng) && action.perform(state, &action_queue, rng) {
             return;
         }
@@ -401,14 +413,30 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
 
     for pokemon_id in pokemon_ids {
         if let Some(pokemon_id) = pokemon_id {
-            if state.pokemon[pokemon_id as usize].major_status_ailment() == MajorStatusAilment::Poisoned {
-                if cfg!(feature = "print-battle") {
-                    let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
-                    state.add_display_text(display_text);
-                }
-                if pokemon::apply_damage(state, pokemon_id, max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16) {
-                    return;
-                }
+            match state.pokemon[pokemon_id as usize].major_status_ailment() {
+                MajorStatusAilment::Poisoned => {
+                    if cfg!(feature = "print-battle") {
+                        let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
+                        state.add_display_text(display_text);
+                    }
+                    if pokemon::apply_damage(state, pokemon_id, max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16) {
+                        return;
+                    }
+                },
+                MajorStatusAilment::BadlyPoisoned => {
+                    if cfg!(feature = "print-battle") {
+                        let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
+                        state.add_display_text(display_text);
+                    }
+                    let amount = {
+                        let pokemon = state.pokemon_by_id(pokemon_id);
+                        ((pokemon.msa_counter() + 1) * max(pokemon.max_hp() / 16, 1)) as i16
+                    };
+                    if pokemon::apply_damage(state, pokemon_id, amount) {
+                        return;
+                    }
+                },
+                _ => {}
             }
 
             if let Some(seeder_pos) = state.pokemon[pokemon_id as usize].seeded_by {

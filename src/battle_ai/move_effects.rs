@@ -1,5 +1,5 @@
 use crate::battle_ai::pokemon;
-use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, clamp};
+use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, clamp, Weather};
 use crate::move_::{MoveCategory, MoveID, Move};
 use crate::species::Species;
 use crate::battle_ai::state::State;
@@ -7,6 +7,7 @@ use rand::prelude::StdRng;
 use rand::Rng;
 use serde::Deserialize;
 use std::cmp::{min, max};
+use std::fmt::Debug;
 
 /// An action selection that will be queued and executed during a turn.
 #[derive(Clone, Debug)]
@@ -79,13 +80,6 @@ impl Action {
         }
     }
 
-    /// Called just before can_be_performed() is evaluated.
-    pub fn pre_action_stuff(&self, state: &mut State) {
-        if let Action::Move {user_id, move_: _, move_index: _, target_positions: _} = self {
-            pokemon::increment_msa_counter(state, *user_id);
-        }
-    }
-
     pub fn perform(&self, state: &mut State, action_queue: &[&Action], rng: &mut StdRng) -> bool {
         match self {
             Action::Switch {user_id, switching_in_id} => {
@@ -117,14 +111,7 @@ impl Action {
                                 state.add_display_text(format!("- {}", target_display_text));
                             }
 
-                            let accuracy = Move::accuracy(*move_id);
-                            let accuracy_check = accuracy == 0 || {
-                                let user = state.pokemon_by_id(*user_id);
-                                let target = state.pokemon_by_id(target_id);
-                                rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
-                            };
-
-                            if accuracy_check {
+                            if Move::accuracy(*move_id).do_accuracy_check(state, *user_id, target_id, rng) {
                                 for effect in Move::effects(*move_id) {
                                     if effect.do_effect(*move_id, state, action_queue, *user_id, target_id, rng) == EffectResult::BattleEnded {
                                         return true;
@@ -152,43 +139,73 @@ impl Action {
 
 #[derive(Debug, Deserialize)]
 pub enum MoveEffect {
-    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
-    StdDamage(Type, u8, u8, u8),
+    Growth,
     /// (stat_index: StatIndex, amount: i8)
     IncTargetStatStage(StatIndex, i8),
-    PoisonPowder,
     LeechSeed,
-    Struggle
+    PoisonPowder,
+    SleepPowder,
+    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
+    StdDamage(Type, u8, u8, u8),
+    Struggle,
+    Synthesis,
+    Toxic
 }
 
 impl MoveEffect {
     fn do_effect(&self, move_: MoveID, state: &mut State, action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
         match self {
+            MoveEffect::Growth => growth(state, user_id),
+            MoveEffect::IncTargetStatStage(stat_index, amount) => {
+                pokemon::increment_stat_stage(state, target_id, *stat_index, *amount);
+                EffectResult::Success
+            },
+            MoveEffect::LeechSeed => leech_seed(state, user_id, target_id),
+            MoveEffect::PoisonPowder => poison_powder(state, target_id),
+            MoveEffect::SleepPowder => sleep_powder(state, target_id),
             MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
                 std_damage(state, user_id, target_id, *damage_type, Move::category(move_), *power, *critical_hit_stage_bonus, *recoil_divisor, rng)
             },
-            MoveEffect::IncTargetStatStage(stat_index, amount) => {
-                pokemon::increment_stat_stage(state, target_id, *stat_index, *amount);
-                EffectResult::Pass
-            },
-            MoveEffect::PoisonPowder => {
-                poison_powder(state, target_id)
-            },
-            MoveEffect::LeechSeed => {
-                leech_seed(state, user_id, target_id)
-            },
-            MoveEffect::Struggle => {
-                struggle(state, user_id, target_id, rng)
-            }
+            MoveEffect::Struggle => struggle(state, user_id, target_id, rng),
+            MoveEffect::Synthesis => synthesis(state, user_id),
+            MoveEffect::Toxic => toxic(state, target_id)
         }
     }
 }
 
+/// The possible outcomes that a move's effect can lead to.
 #[derive(Eq, PartialEq)]
 enum EffectResult {
-    Pass,
+    Success,
     Fail,
     BattleEnded
+}
+
+#[derive(Debug, Deserialize)]
+pub enum MoveAccuracy {
+    Ignore,
+    /// (percentage: u8)
+    Standard(u8),
+    Toxic
+}
+
+impl MoveAccuracy {
+    fn do_accuracy_check(&self, state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+        match self {
+            MoveAccuracy::Ignore => true,
+            MoveAccuracy::Standard(accuracy) => MoveAccuracy::std_accuracy_check(state, *accuracy, user_id, target_id, rng),
+            MoveAccuracy::Toxic => {
+                (game_version().gen() >= 6 && state.pokemon_by_id(user_id).is_type(Type::Poison))
+                    || MoveAccuracy::std_accuracy_check(state, if game_version().gen() <= 4 { 85 } else { 90 }, user_id, target_id, rng)
+            }
+        }
+    }
+
+    fn std_accuracy_check(state: &mut State, accuracy: u8, user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
+        rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
+    }
 }
 
 fn critical_hit_chance(critical_hit_stage_bonus: u8) -> f64 {
@@ -218,7 +235,6 @@ fn std_base_damage(power: u8, calculated_atk: u32, calculated_def: u32, offensiv
 
 // ---- MOVE EFFECTS ---- //
 
-/// Returns whether the battle has ended.
 fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8, rng: &mut StdRng) -> EffectResult {
     let target_first_type;
     let target_second_type;
@@ -317,10 +333,20 @@ fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8)
             return EffectResult::BattleEnded;
         }
     }
-    EffectResult::Pass
+    EffectResult::Success
 }
 
-/// Returns whether the battle has ended.
+fn growth(state: &mut State, user_id: u8) -> EffectResult {
+    if game_version().gen() <= 4 {
+        pokemon::increment_stat_stage(state, user_id, StatIndex::SpAtk, 1);
+    } else {
+        let requested_amount = if state.weather == Weather::HarshSunshine { 2 } else { 1 };
+        pokemon::increment_stat_stage(state, user_id, StatIndex::Atk, requested_amount);
+        pokemon::increment_stat_stage(state, user_id, StatIndex::SpAtk, requested_amount);
+    }
+    EffectResult::Success
+}
+
 fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
     match state.pokemon_by_id(target_id).seeded_by {
         Some(_) => {
@@ -343,13 +369,12 @@ fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
                     let target_name = Species::name(state.pokemon_by_id(target_id).species());
                     state.add_display_text(format!("A seed was planted on {}!", target_name));
                 }
-                EffectResult::Pass
+                EffectResult::Success
             }
         }
     }
 }
 
-/// Returns whether the battle has ended.
 fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
     if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
         if cfg!(feature = "print-battle") {
@@ -359,13 +384,27 @@ fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
         return EffectResult::Fail;
     }
     if pokemon::poison(state, target_id, false) {
-        EffectResult::Pass
+        EffectResult::Success
     } else {
         EffectResult::Fail
     }
 }
 
-/// Returns whether the battle has ended.
+fn sleep_powder(state: &mut State, target_id: u8) -> EffectResult {
+    if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
+        if cfg!(feature = "print-battle") {
+            let species_name = Species::name(state.pokemon_by_id(target_id).species());
+            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
+        }
+        return EffectResult::Fail;
+    }
+    if pokemon::put_to_sleep(state, target_id) {
+        EffectResult::Success
+    } else {
+        EffectResult::Fail
+    }
+}
+
 fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
     match game_version().gen() {
         1..=3 => {
@@ -377,5 +416,24 @@ fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> 
             }
             recoil(state, user_id, state.pokemon_by_id(user_id).max_hp() as i16, 4)
         }
+    }
+}
+
+fn synthesis(state: &mut State, user_id: u8) -> EffectResult {
+    let mut max_hp = state.pokemon_by_id(user_id).current_hp() as i16;
+    match state.weather {
+        Weather::None | Weather::StrongWinds => max_hp /= 2,
+        Weather::HarshSunshine => max_hp = max_hp * 2 / 3,
+        _ => max_hp /= 4
+    }
+    pokemon::apply_damage(state, user_id, -max_hp);
+    EffectResult::Success
+}
+
+fn toxic(state: &mut State, target_id: u8) -> EffectResult {
+    if pokemon::badly_poison(state, target_id, false) {
+        EffectResult::Success
+    } else {
+        EffectResult::Fail
     }
 }
