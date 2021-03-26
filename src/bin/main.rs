@@ -30,7 +30,7 @@ fn main() {
 
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
-    let num_battles = 100;
+    let num_battles = 1;
     let meta: Vec<TeamBuild> = iter::repeat_with(|| TeamBuild::new(&mut rng)).take(2 * num_battles).collect();
     let start_time = Instant::now();
     for i in 0..num_battles {

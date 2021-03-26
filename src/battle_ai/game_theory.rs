@@ -1,7 +1,7 @@
 use std::f64;
 use std::fmt::{Debug, Error, Formatter};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ZeroSumNashEq {
     /// The maximizing player's strategy at equilibrium.
     pub max_player_strategy: Vec<f64>,
