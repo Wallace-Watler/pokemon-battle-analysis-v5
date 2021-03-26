@@ -6,14 +6,14 @@ use crate::{FieldPosition, Weather, Terrain, choose_weighted_index, MajorStatusA
 use crate::battle_ai::move_effects::Action;
 use crate::move_::{Move, MoveCategory};
 use crate::battle_ai::pokemon::{Pokemon, TeamBuild};
-use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix};
+use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix, calc_nash_eq};
 
 const AI_LEVEL: u8 = 3;
 
 pub static mut NUM_STATE_COPIES: usize = 0;
 
 /// Represents the entire game state of a battle.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct State {
     /// ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team.
     pokemon: [Pokemon; 12],
@@ -26,14 +26,18 @@ pub struct State {
     turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
     display_text: Vec<String>,
-    children: Vec<State>,
-    num_maximizer_actions: usize,
-    num_minimizer_actions: usize
+    children: Vec<Option<State>>,
+    max_actions: Vec<Action>,
+    min_actions: Vec<Action>,
+    max_action_order: Vec<usize>,
+    min_action_order: Vec<usize>,
+    max_consecutive_switches: u16,
+    min_consecutive_switches: u16
 }
 
 impl State {
-    const fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain) -> State {
-        State {
+    fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain, rng: &mut StdRng) -> State {
+        let mut state = State {
             pokemon,
             min_pokemon_id: None,
             max_pokemon_id: None,
@@ -42,9 +46,17 @@ impl State {
             turn_number: 0,
             display_text: Vec::new(),
             children: Vec::new(),
-            num_maximizer_actions: 0,
-            num_minimizer_actions: 0
-        }
+            max_actions: Vec::new(),
+            min_actions: Vec::new(),
+            max_action_order: Vec::new(),
+            min_action_order: Vec::new(),
+            max_consecutive_switches: 0,
+            min_consecutive_switches: 0
+        };
+
+        generate_actions(&mut state, rng);
+
+        state
     }
 
     pub const fn pokemon_by_id(&self, pokemon_id: u8) -> &Pokemon {
@@ -53,10 +65,6 @@ impl State {
 
     pub fn pokemon_by_id_mut(&mut self, pokemon_id: u8) -> &mut Pokemon {
         &mut self.pokemon[pokemon_id as usize]
-    }
-
-    pub fn weather() {
-
     }
 
     pub fn add_display_text(&mut self, text: String) {
@@ -72,6 +80,7 @@ impl State {
     /// Copies only the game state into a new State instance; doesn't copy the child matrix or display text.
     fn copy_game_state(&self) -> State {
         unsafe { NUM_STATE_COPIES += 1; }
+
         State {
             pokemon: self.pokemon.clone(),
             min_pokemon_id: self.min_pokemon_id,
@@ -81,13 +90,59 @@ impl State {
             turn_number: self.turn_number,
             display_text: Vec::new(),
             children: Vec::new(),
-            num_maximizer_actions: 0,
-            num_minimizer_actions: 0
+            max_actions: Vec::new(),
+            min_actions: Vec::new(),
+            max_action_order: Vec::new(),
+            min_action_order: Vec::new(),
+            max_consecutive_switches: self.max_consecutive_switches,
+            min_consecutive_switches: self.min_consecutive_switches
         }
     }
 
     pub fn battle_end_check(&self) -> bool {
         self.pokemon[0..6].iter().all(|pokemon| pokemon.current_hp() == 0) || self.pokemon[6..12].iter().all(|pokemon| pokemon.current_hp() == 0)
+    }
+
+    /// Gets the specified child or generates it using this state's actions if it does not exist.
+    ///
+    /// Accesses children through the action orderings, giving the appearance that the child
+    /// matrix is sorted by whichever actions are expected to produce the best outcome.
+    fn get_or_gen_child(&mut self, i: usize, j: usize, rng: &mut StdRng) -> &mut State {
+        let max_action_index = self.max_action_order[i];
+        let min_action_index = self.min_action_order[j];
+        let child_index = max_action_index * self.min_actions.len() + min_action_index;
+
+        if self.children[child_index].is_none() {
+            let mut child = self.copy_game_state();
+            let max_action = &self.max_actions[max_action_index];
+            let min_action = &self.min_actions[min_action_index];
+            child.max_consecutive_switches = match max_action {
+                Action::Switch { .. } => child.max_consecutive_switches + 1,
+                _ => 0
+            };
+            child.min_consecutive_switches = match min_action {
+                Action::Switch { .. } => child.min_consecutive_switches + 1,
+                _ => 0
+            };
+            play_out_turn(&mut child, vec![max_action, min_action], rng);
+            generate_actions(&mut child, rng);
+            self.children[child_index] = Some(child);
+        }
+
+        self.children[child_index].as_mut().unwrap()
+    }
+
+    /// Removes the specified child from this state.
+    ///
+    /// Accesses children through the action orderings, giving the appearance that the child
+    /// matrix is sorted by whichever actions are expected to produce the best outcome.
+    fn remove_child(&mut self, i: usize, j: usize, rng: &mut StdRng) -> State {
+        self.get_or_gen_child(i, j, rng);
+
+        let max_action_index = self.max_action_order[i];
+        let min_action_index = self.min_action_order[j];
+        let child_index = max_action_index * self.min_actions.len() + min_action_index;
+        self.children.remove(child_index).unwrap()
     }
 }
 
@@ -116,24 +171,23 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
             Pokemon::from(max_team.next().unwrap()),
             Pokemon::from(max_team.next().unwrap())
         ]
-    }, Weather::default(), Terrain::default());
+    }, Weather::default(), Terrain::default(), rng);
 
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
         state.print_display_text();
     }
 
-    let mut nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
+    let mut nash_eq = iterative_deepening(&mut state, AI_LEVEL, rng);
 
-    while !nash_eq.min_player_strategy.is_empty() && !nash_eq.max_player_strategy.is_empty() {
-        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
+    while !state.max_actions.is_empty() && !state.min_actions.is_empty() {
         let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
+        let minimizer_choice = choose_weighted_index(&nash_eq.min_player_strategy, rng);
 
-        let child_index = maximizer_choice * state.num_minimizer_actions + minimizer_choice;
-        let child_box = state.children.remove(child_index);
-        state = child_box;
+        let child = state.remove_child(maximizer_choice, minimizer_choice, rng);
+        state = child;
         if cfg!(feature = "print-battle") { state.print_display_text(); }
-        nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
+        nash_eq = iterative_deepening(&mut state, AI_LEVEL, rng);
     }
 
     if cfg!(feature = "print-battle") {
@@ -143,27 +197,32 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
     nash_eq.expected_payoff
 }
 
+fn iterative_deepening(state: &mut State, max_recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
+    smab_search(state, -1.0, 1.0, AI_LEVEL, rng)
+    //println!("Max actions: {:?}", state.max_actions);
+    //println!("Min actions: {:?}", state.min_actions);
+    //println!("Nash eq: {:?}", state.nash_eq);
+    /*smab_search(state, -1.0, 1.0, 1, rng);
+    for recursions in 2..=max_recursions {
+        smab_search(state, -1.0, 1.0, recursions, rng);
+    }*/
+}
+
 /// Simultaneous move alpha-beta search, implemented as a simplification of
 /// [Alpha-Beta Pruning for Games with Simultaneous Moves](docs/Alpha-Beta_Pruning_for_Games_with_Simultaneous_Moves.pdf).
 fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
-    if recursions < 1 {
+    let m = state.max_actions.len();
+    let n = state.min_actions.len();
+
+    // If depth limit reached or either agent has no actions, stop search.
+    if recursions < 1 || m == 0 || n == 0 {
         return ZeroSumNashEq {
-            max_player_strategy: Vec::new(),
-            min_player_strategy: Vec::new(),
+            max_player_strategy: vec![1.0 / m as f64; m],
+            min_player_strategy: vec![1.0 / n as f64; n],
             expected_payoff: (state.pokemon[6..12].iter().map(|pokemon| pokemon.current_hp() as f64 / pokemon.max_hp() as f64).sum::<f64>()
-                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp() as f64 / pokemon.max_hp() as f64).sum::<f64>()) / 6.0,
+                - state.pokemon[0..6].iter().map(|pokemon| pokemon.current_hp() as f64 / pokemon.max_hp() as f64).sum::<f64>()) / 6.0
         };
     }
-
-    if state.children.is_empty() {
-        generate_immediate_children(state, rng);
-        if state.children.is_empty() { // If children is still empty, battle has ended.
-            return smab_search(state, alpha, beta, 0, rng);
-        }
-    }
-
-    let m = state.num_maximizer_actions;
-    let n = state.num_minimizer_actions;
 
     let mut payoff_matrix = Matrix::of(0.0, m, n);
     let mut row_domination = vec![false; m];
@@ -173,7 +232,7 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
 
     let mut explore_child = |i: usize, j: usize| {
         if !row_domination[i] && !col_domination[j] {
-            let child_value = smab_search(&mut state.children[i * n + j], alpha, beta, recursions - 1, rng).expected_payoff;
+            let child_value = smab_search(state.get_or_gen_child(i, j, rng), alpha, beta, recursions - 1, rng).expected_payoff;
             if child_value <= alpha {
                 row_domination[i] = true;
             } else if child_value >= beta {
@@ -199,30 +258,122 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
     }
 
     if row_domination.iter().all(|b| *b) {
-        ZeroSumNashEq {
+        return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
             expected_payoff: alpha
-        }
-    } else if col_domination.iter().all(|b| *b) {
-        ZeroSumNashEq {
+        };
+    }
+
+    if col_domination.iter().all(|b| *b) {
+        return ZeroSumNashEq {
             max_player_strategy: Vec::new(),
             min_player_strategy: Vec::new(),
             expected_payoff: beta
-        }
-    } else {
-        // Diminishing returns for future payoffs; 0.0 will ignore future payoffs entirely, while
-        // 1.0 will only account for the farthest-out payoffs. Having the farthest payoffs account
-        // for about half of the value at the root seems to work well, hence the given expression.
-        let gamma = 0.5_f64.powf(1.0 / AI_LEVEL as f64);
-
-        let mut nash_eq = game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0);
-        nash_eq.expected_payoff *= gamma;
-        nash_eq.expected_payoff += (1.0 - gamma) * smab_search(state, alpha, beta, 0, rng).expected_payoff;
-        nash_eq
+        };
     }
+
+    let nash_eq = game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0);
+    // TODO: Set state.max_action_order and state.min_action_order based on strategies
+    nash_eq
 }
 
+fn generate_actions(state: &mut State, rng: &mut StdRng) {
+    match state.min_pokemon_id.zip(state.max_pokemon_id) {
+        None => { // Agent(s) must choose Pokemon to send out
+            state.max_actions = match state.max_pokemon_id {
+                None => (6..12)
+                    .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
+                    .map(|id| Action::Switch {
+                        user_id: None,
+                        switching_in_id: id,
+                        target_position: FieldPosition::Max
+                    }).collect(),
+                Some(_) => vec![Action::Nop]
+            };
+
+            state.min_actions = match state.min_pokemon_id {
+                None => (0..6)
+                    .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
+                    .map(|id| Action::Switch {
+                        user_id: None,
+                        switching_in_id: id,
+                        target_position: FieldPosition::Min
+                    }).collect(),
+                Some(_) => vec![Action::Nop]
+            };
+        },
+        Some((max_pokemon_id, min_pokemon_id)) => { // Agents must choose actions for each Pokemon
+            let mut gen_actions = |user_id: u8| -> Vec<Action> {
+                let mut actions: Vec<Action> = Vec::with_capacity(9);
+
+                if let Some(next_move_action) = state.pokemon_by_id(user_id).next_move_action.clone() { // TODO: Is this actually what should happen?
+                    if next_move_action.can_be_performed(state, rng) {
+                        actions.push(next_move_action);
+                        state.pokemon_by_id_mut(user_id).next_move_action = None;
+                        return actions;
+                    } else {
+                        state.pokemon_by_id_mut(user_id).next_move_action = None;
+                    }
+                }
+
+                let user = state.pokemon_by_id(user_id);
+                for move_index in 0..user.known_moves().len() as u8 {
+                    if user.can_choose_move(Some(move_index)) {
+                        let move_ = user.known_move(move_index).move_();
+                        actions.push(Action::Move {
+                            user_id,
+                            move_,
+                            move_index: Some(move_index),
+                            target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                                .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
+                        });
+                    }
+                }
+
+                // TODO: Can Struggle be used if switch actions are available?
+                if actions.is_empty() {
+                    let struggle = Move::id_by_name("Struggle").unwrap();
+                    actions.push(Action::Move {
+                        user_id,
+                        move_: struggle,
+                        move_index: None,
+                        target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                            .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
+                    });
+                }
+
+                if (user_id < 6 && state.min_consecutive_switches < 2) || (user_id >= 6 && state.max_consecutive_switches < 2) {
+                    for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
+                        let team_member = state.pokemon_by_id(team_member_id);
+                        if team_member.current_hp() > 0 && team_member.field_position() == None && team_member.known_moves().iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
+                            actions.push(Action::Switch {
+                                user_id: Some(user_id),
+                                switching_in_id: team_member_id as u8,
+                                target_position: state.pokemon_by_id(user_id).field_position().unwrap()
+                            });
+                        }
+                    }
+                }
+
+                actions
+            };
+
+            let max_actions = gen_actions(max_pokemon_id);
+            let min_actions = gen_actions(min_pokemon_id);
+            state.max_actions = max_actions;
+            state.min_actions = min_actions;
+
+            state.max_actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2));
+            state.min_actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2));
+        }
+    }
+
+    state.max_action_order = (0..state.max_actions.len()).collect();
+    state.min_action_order = (0..state.min_actions.len()).collect();
+    state.children = vec![None; state.max_actions.len() * state.min_actions.len()];
+}
+/*
 fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
     match state.min_pokemon_id.zip(state.max_pokemon_id) {
         None => { // Agent(s) must choose Pokemon to send out
@@ -347,20 +498,21 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
             state.num_minimizer_actions = min_actions.len();
         }
     }
-}
+}*/
 
 // TODO: Make better; order actions so that pruning is most likely to occur.
-fn action_comparator(act1: &Action, act2: &Action, played_in: &State) -> Ordering {
+fn action_comparator(act1: &Action, act2: &Action) -> Ordering {
     match act1 {
+        Action::Nop => Ordering::Greater,
         Action::Switch { .. } => {
             match act2 {
+                Action::Nop => Ordering::Less,
                 Action::Switch { .. } => Ordering::Equal,
                 Action::Move { .. } => Ordering::Greater
             }
         },
         Action::Move {user_id: _, move_: act1_move, move_index: _, target_positions: _} => {
             match act2 {
-                Action::Switch { .. } => Ordering::Less,
                 Action::Move {user_id: _, move_: act2_move, move_index: _, target_positions: _} => {
                     match Move::category(*act1_move) {
                         MoveCategory::Status => {
@@ -376,7 +528,8 @@ fn action_comparator(act1: &Action, act2: &Action, played_in: &State) -> Orderin
                             }
                         }
                     }
-                }
+                },
+                _ => Ordering::Less
             }
         }
     }

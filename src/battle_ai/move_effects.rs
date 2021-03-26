@@ -19,10 +19,13 @@ pub enum Action {
         move_index: Option<u8>,
         target_positions: Vec<FieldPosition>
     },
+    /// No operation. Used whenever only one agent has a choice and the other must do nothing.
+    Nop,
     /// An action where the user switches places with a team member not currently on the field.
     Switch {
-        user_id: u8,
-        switching_in_id: u8
+        user_id: Option<u8>,
+        switching_in_id: u8,
+        target_position: FieldPosition
     }
 }
 
@@ -34,10 +37,8 @@ impl Action {
      */
     pub fn outspeeds(&self, state_box: &State, other_action: &Action, rng: &mut StdRng) -> bool {
         match other_action {
-            Action::Switch {user_id: _, switching_in_id: _} => false,
             Action::Move {user_id: other_user_id, move_: other_move, move_index: _, target_positions: _} => {
                 match self {
-                    Action::Switch {user_id: _, switching_in_id: _} => true,
                     Action::Move {user_id, move_, move_index: _, target_positions: _} => {
                         let priority_stage = Move::priority_stage(*move_);
                         let other_priority_stage = Move::priority_stage(*other_move);
@@ -48,15 +49,20 @@ impl Action {
                         } else {
                             priority_stage > other_priority_stage
                         }
-                    }
+                    },
+                    _ => true
                 }
+            },
+            Action::Nop => false,
+            Action::Switch { .. } => match self {
+                Action::Nop => true,
+                _ => false
             }
         }
     }
 
     pub fn can_be_performed(&self, state: &mut State, rng: &mut StdRng) -> bool {
         match self {
-            Action::Switch {user_id: _, switching_in_id: _} => true,
             Action::Move {user_id, move_: _, move_index, target_positions: _} => {
                 let user_msa = state.pokemon_by_id(*user_id).major_status_ailment();
                 if user_msa == MajorStatusAilment::Asleep || user_msa == MajorStatusAilment::Frozen || (user_msa == MajorStatusAilment::Paralyzed && rng.gen_bool(0.25)) {
@@ -76,16 +82,18 @@ impl Action {
                     },
                     None => true
                 }
-            }
+            },
+            _ => true
         }
     }
 
     pub fn perform(&self, state: &mut State, action_queue: &[&Action], rng: &mut StdRng) -> bool {
         match self {
-            Action::Switch {user_id, switching_in_id} => {
-                let user_field_pos = state.pokemon_by_id(*user_id).field_position().unwrap();
-                pokemon::remove_from_field(state, *user_id);
-                pokemon::add_to_field(state, *switching_in_id, user_field_pos)
+            Action::Switch {user_id, switching_in_id, target_position} => {
+                if let Some(user_id) = user_id {
+                    pokemon::remove_from_field(state, *user_id);
+                }
+                pokemon::add_to_field(state, *switching_in_id, *target_position)
             },
             Action::Move {user_id, move_: move_id, move_index, target_positions} => {
                 if let Some(move_index) = move_index {
@@ -132,7 +140,8 @@ impl Action {
                 }
 
                 false
-            }
+            },
+            Action::Nop => false
         }
     }
 }
