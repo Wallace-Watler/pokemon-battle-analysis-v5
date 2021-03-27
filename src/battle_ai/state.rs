@@ -7,6 +7,7 @@ use crate::battle_ai::move_effects::Action;
 use crate::move_::{Move, MoveCategory};
 use crate::battle_ai::pokemon::{Pokemon, TeamBuild};
 use crate::battle_ai::game_theory::{ZeroSumNashEq, Matrix, calc_nash_eq};
+use std::borrow::Borrow;
 
 const AI_LEVEL: u8 = 3;
 
@@ -27,8 +28,8 @@ pub struct State {
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
     display_text: Vec<String>,
     children: Vec<Option<State>>,
-    max_actions: Vec<Action>,
-    min_actions: Vec<Action>,
+    max_actions: Vec<Box<Action>>,
+    min_actions: Vec<Box<Action>>,
     max_action_order: Vec<usize>,
     min_action_order: Vec<usize>,
     max_consecutive_switches: u16,
@@ -114,8 +115,8 @@ impl State {
 
         if self.children[child_index].is_none() {
             let mut child = self.copy_game_state();
-            let max_action = &self.max_actions[max_action_index];
-            let min_action = &self.min_actions[min_action_index];
+            let max_action = &*self.max_actions[max_action_index];
+            let min_action = &*self.min_actions[min_action_index];
             child.max_consecutive_switches = match max_action {
                 Action::Switch { .. } => child.max_consecutive_switches + 1,
                 _ => 0
@@ -280,87 +281,10 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
 
 fn generate_actions(state: &mut State, rng: &mut StdRng) {
     match state.min_pokemon_id.zip(state.max_pokemon_id) {
-        None => { // Agent(s) must choose Pokemon to send out
-            state.max_actions = match state.max_pokemon_id {
-                None => (6..12)
-                    .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
-                    .map(|id| Action::Switch {
-                        user_id: None,
-                        switching_in_id: id,
-                        target_position: FieldPosition::Max
-                    }).collect(),
-                Some(_) => vec![Action::Nop]
-            };
-
-            state.min_actions = match state.min_pokemon_id {
-                None => (0..6)
-                    .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
-                    .map(|id| Action::Switch {
-                        user_id: None,
-                        switching_in_id: id,
-                        target_position: FieldPosition::Min
-                    }).collect(),
-                Some(_) => vec![Action::Nop]
-            };
-        },
+        None => agents_choose_pokemon_to_send_out(state),
         Some((max_pokemon_id, min_pokemon_id)) => { // Agents must choose actions for each Pokemon
-            let mut gen_actions = |user_id: u8| -> Vec<Action> {
-                let mut actions: Vec<Action> = Vec::with_capacity(9);
-
-                if let Some(next_move_action) = state.pokemon_by_id(user_id).next_move_action.clone() { // TODO: Is this actually what should happen?
-                    if next_move_action.can_be_performed(state, rng) {
-                        actions.push(next_move_action);
-                        state.pokemon_by_id_mut(user_id).next_move_action = None;
-                        return actions;
-                    } else {
-                        state.pokemon_by_id_mut(user_id).next_move_action = None;
-                    }
-                }
-
-                let user = state.pokemon_by_id(user_id);
-                for move_index in 0..user.known_moves().len() as u8 {
-                    if user.can_choose_move(Some(move_index)) {
-                        let move_ = user.known_move(move_index).move_();
-                        actions.push(Action::Move {
-                            user_id,
-                            move_,
-                            move_index: Some(move_index),
-                            target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                                .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
-                        });
-                    }
-                }
-
-                // TODO: Can Struggle be used if switch actions are available?
-                if actions.is_empty() {
-                    let struggle = Move::id_by_name("Struggle").unwrap();
-                    actions.push(Action::Move {
-                        user_id,
-                        move_: struggle,
-                        move_index: None,
-                        target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
-                            .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
-                    });
-                }
-
-                if (user_id < 6 && state.min_consecutive_switches < 2) || (user_id >= 6 && state.max_consecutive_switches < 2) {
-                    for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
-                        let team_member = state.pokemon_by_id(team_member_id);
-                        if team_member.current_hp() > 0 && team_member.field_position() == None && team_member.known_moves().iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
-                            actions.push(Action::Switch {
-                                user_id: Some(user_id),
-                                switching_in_id: team_member_id as u8,
-                                target_position: state.pokemon_by_id(user_id).field_position().unwrap()
-                            });
-                        }
-                    }
-                }
-
-                actions
-            };
-
-            let max_actions = gen_actions(max_pokemon_id);
-            let min_actions = gen_actions(min_pokemon_id);
+            let max_actions = gen_actions_for_user(state, rng, max_pokemon_id);
+            let min_actions = gen_actions_for_user(state, rng, min_pokemon_id);
             state.max_actions = max_actions;
             state.min_actions = min_actions;
 
@@ -373,6 +297,89 @@ fn generate_actions(state: &mut State, rng: &mut StdRng) {
     state.min_action_order = (0..state.min_actions.len()).collect();
     state.children = vec![None; state.max_actions.len() * state.min_actions.len()];
 }
+
+#[inline(never)]
+fn agents_choose_pokemon_to_send_out(state: &mut State) {
+    state.max_actions = match state.max_pokemon_id {
+        None => (6..12)
+            .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
+            .map(|id| Box::new(Action::Switch {
+                user_id: None,
+                switching_in_id: id,
+                target_position: FieldPosition::Max
+            })).collect(),
+        Some(_) => vec![Box::new(Action::Nop)]
+    };
+
+    state.min_actions = match state.min_pokemon_id {
+        None => (0..6)
+            .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
+            .map(|id| Box::new(Action::Switch {
+                user_id: None,
+                switching_in_id: id,
+                target_position: FieldPosition::Min
+            })).collect(),
+        Some(_) => vec![Box::new(Action::Nop)]
+    };
+}
+
+#[inline(never)]
+fn gen_actions_for_user(state: &mut State, rng: &mut StdRng, user_id: u8) -> Vec<Box<Action>> {
+    let mut actions: Vec<Box<Action>> = Vec::with_capacity(9);
+
+    // TODO: Is this actually what should happen?
+    if let Some(next_move_action) = state.pokemon_by_id(user_id).next_move_action.clone() {
+        if next_move_action.can_be_performed(state, rng) {
+            actions.push(next_move_action);
+            state.pokemon_by_id_mut(user_id).next_move_action = None;
+            return actions;
+        } else {
+            state.pokemon_by_id_mut(user_id).next_move_action = None;
+        }
+    }
+
+    let user = state.pokemon_by_id(user_id);
+    for move_index in 0..user.known_moves().len() as u8 {
+        if user.can_choose_move(Some(move_index)) {
+            let move_ = user.known_move(move_index).move_();
+            actions.push(Box::new(Action::Move {
+                user_id,
+                move_,
+                move_index: Some(move_index),
+                target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                    .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
+            }));
+        }
+    }
+
+    // TODO: Can Struggle be used if switch actions are available?
+    if actions.is_empty() {
+        let struggle = Move::id_by_name("Struggle").unwrap();
+        actions.push(Box::new(Action::Move {
+            user_id,
+            move_: struggle,
+            move_index: None,
+            target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
+                .filter(|field_pos| Move::targeting(struggle).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
+        }));
+    }
+
+    if (user_id < 6 && state.min_consecutive_switches < 2) || (user_id >= 6 && state.max_consecutive_switches < 2) {
+        for team_member_id in if user_id < 6 { 0..6 } else { 6..12 } {
+            let team_member = state.pokemon_by_id(team_member_id);
+            if team_member.current_hp() > 0 && team_member.field_position() == None && team_member.known_moves().iter().map(|known_move| known_move.pp).sum::<u8>() > 0 {
+                actions.push(Box::new(Action::Switch {
+                    user_id: Some(user_id),
+                    switching_in_id: team_member_id as u8,
+                    target_position: state.pokemon_by_id(user_id).field_position().unwrap()
+                }));
+            }
+        }
+    }
+
+    actions
+}
+
 /*
 fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
     match state.min_pokemon_id.zip(state.max_pokemon_id) {
@@ -501,6 +508,7 @@ fn generate_immediate_children(state: &mut State, rng: &mut StdRng) {
 }*/
 
 // TODO: Make better; order actions so that pruning is most likely to occur.
+#[inline(never)]
 fn action_comparator(act1: &Action, act2: &Action) -> Ordering {
     match act1 {
         Action::Nop => Ordering::Greater,

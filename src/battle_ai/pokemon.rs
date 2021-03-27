@@ -49,7 +49,7 @@ pub struct Pokemon {
     field_position: Option<FieldPosition>,
     known_moves: Vec<MoveInstance>,
     /// Needed for handling two-turn moves.
-    pub next_move_action: Option<Action>
+    pub next_move_action: Option<Box<Action>>
 }
 
 impl Pokemon {
