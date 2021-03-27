@@ -31,7 +31,7 @@ fn main() {
 
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
-    let num_battles = 20;
+    let num_battles = 30;
     let meta: Vec<TeamBuild> = iter::repeat_with(|| TeamBuild::new(&mut rng)).take(2 * num_battles).collect();
     let start_time = Instant::now();
     for i in 0..num_battles {
@@ -40,9 +40,7 @@ fn main() {
     }
     println!("Elapsed time: {:?}", start_time.elapsed());
     println!("Num state copies: {:?}", unsafe { state::NUM_STATE_COPIES });
-    println!("Avg time per state: {:?}", unsafe {
-        start_time.elapsed().as_nanos() / state::NUM_STATE_COPIES as u128
-    });
+    println!("Avg time per state: {:?} ns", unsafe { start_time.elapsed().as_nanos() / state::NUM_STATE_COPIES as u128 });
 
     /*let mut solver = match fs::read_to_string("solver_state.json") {
         Ok(solver_json) => serde_json::from_str(solver_json.as_str()).unwrap(),
