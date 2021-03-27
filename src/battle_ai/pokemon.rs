@@ -49,7 +49,7 @@ pub struct Pokemon {
     field_position: Option<FieldPosition>,
     known_moves: Vec<MoveInstance>,
     /// Needed for handling two-turn moves.
-    pub next_move_action: Option<Box<Action>>
+    pub next_move_action: Option<Action>
 }
 
 impl Pokemon {
@@ -517,7 +517,7 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
         }
     }
 
-    state.battle_end_check()
+    state.has_battle_ended()
 }
 
 pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
@@ -689,7 +689,7 @@ pub fn apply_damage(state: &mut State, pokemon_id: u8, amount: i16) -> bool {
             state.add_display_text(display_text);
         }
         remove_from_field(state, pokemon_id);
-        return state.battle_end_check();
+        return state.has_battle_ended();
     }
 
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
