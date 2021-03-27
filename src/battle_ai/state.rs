@@ -5,19 +5,19 @@ use rand::Rng;
 
 use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, Terrain, Weather};
 use crate::battle_ai::{game_theory, pokemon};
-use crate::battle_ai::game_theory::{calc_nash_eq, Matrix, ZeroSumNashEq};
+use crate::battle_ai::game_theory::{Matrix, ZeroSumNashEq};
 use crate::battle_ai::move_effects::Action;
 use crate::battle_ai::pokemon::{Pokemon, TeamBuild};
 use crate::move_::{Move, MoveCategory};
 
 /// How many turns ahead the agents compute
-const AI_LEVEL: u8 = 3;
+pub const AI_LEVEL: u8 = 3;
 
 /// Maximum number of times each agent is allowed to switch out Pokemon before it must choose a move
 /// (does not count switching one in to replace a fainted team member)
 const CONSECUTIVE_SWITCH_CAP: u16 = 2;
 
-pub static mut NUM_STATE_COPIES: usize = 0;
+pub static mut NUM_STATE_COPIES: u64 = 0;
 
 /// Represents the entire game state of a battle.
 #[derive(Clone, Debug)]
@@ -103,7 +103,7 @@ impl State {
     }
 
     pub fn has_battle_ended(&self) -> bool {
-        self.pokemon[0..6].iter().all(|pokemon| pokemon.current_hp() <= 0) || self.pokemon[6..12].iter().all(|pokemon| pokemon.current_hp() <= 0)
+        self.pokemon[0..6].iter().all(|pokemon| pokemon.current_hp() == 0) || self.pokemon[6..12].iter().all(|pokemon| pokemon.current_hp() == 0)
     }
 
     /// Gets the specified child or generates it using this state's actions if it does not exist.
@@ -199,7 +199,7 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
         state.print_display_text();
     }
 
-    let mut nash_eq = iterative_deepening(&mut state, AI_LEVEL, rng);
+    let mut nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
 
     while !state.max.actions.is_empty() && !state.min.actions.is_empty() {
         let maximizer_choice = choose_weighted_index(&nash_eq.max_player_strategy, rng);
@@ -208,7 +208,7 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
         let child = state.remove_child(maximizer_choice, minimizer_choice, rng);
         state = child;
         if cfg!(feature = "print-battle") { state.print_display_text(); }
-        nash_eq = iterative_deepening(&mut state, AI_LEVEL, rng);
+        nash_eq = smab_search(&mut state, -1.0, 1.0, AI_LEVEL, rng);
     }
 
     if cfg!(feature = "print-battle") {
@@ -216,17 +216,6 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
     }
 
     nash_eq.expected_payoff
-}
-
-fn iterative_deepening(state: &mut State, max_recursions: u8, rng: &mut StdRng) -> ZeroSumNashEq {
-    smab_search(state, -1.0, 1.0, max_recursions, rng)
-    //println!("Max actions: {:?}", state.max_actions);
-    //println!("Min actions: {:?}", state.min_actions);
-    //println!("Nash eq: {:?}", state.nash_eq);
-    /*smab_search(state, -1.0, 1.0, 1, rng);
-    for recursions in 2..=max_recursions {
-        smab_search(state, -1.0, 1.0, recursions, rng);
-    }*/
 }
 
 /// Simultaneous move alpha-beta search, implemented as a simplification of
@@ -295,7 +284,24 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
     }
 
     let nash_eq = game_theory::calc_nash_eq(&payoff_matrix, &row_domination, &col_domination, 2.0);
-    // TODO: Set state.max_action_order and state.min_action_order based on strategies
+
+    // Exploiting iterative deepening: sort actions from highest probability of being played to
+    // lowest probability so that alpha-beta is more likely to prune children on the next pass
+    // through this state.
+    let action_order_cmp = |strategy: &[f64], act_index1: &usize, act_index2: &usize| {
+        let diff = strategy[*act_index1] - strategy[*act_index2];
+        if almost::zero(diff) {
+            Ordering::Equal
+        } else if diff < 0.0 {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        }
+    };
+
+    state.max.action_order.sort_unstable_by(|act_index1, act_index2| action_order_cmp(&nash_eq.max_player_strategy, act_index1, act_index2));
+    state.min.action_order.sort_unstable_by(|act_index1, act_index2| action_order_cmp(&nash_eq.min_player_strategy, act_index1, act_index2));
+
     nash_eq
 }
 
@@ -310,8 +316,8 @@ fn generate_actions(state: &mut State, rng: &mut StdRng) {
 
             // I don't know why reversing the comparator makes it run several times faster, but it
             // does, so I did.
-            state.max.actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2).reverse());
-            state.min.actions.sort_unstable_by(|act1, act2| action_comparator(act1, act2).reverse());
+            state.max.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2).reverse());
+            state.min.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2).reverse());
         }
     }
 
@@ -401,7 +407,7 @@ fn gen_actions_for_user(state: &mut State, rng: &mut StdRng, user_id: u8) -> Vec
 }
 
 // TODO: Make better; order actions so that pruning is most likely to occur.
-fn action_comparator(act1: &Action, act2: &Action) -> Ordering {
+fn action_cmp(act1: &Action, act2: &Action) -> Ordering {
     match act1 {
         Action::Nop => Ordering::Greater,
         Action::Switch { .. } => {

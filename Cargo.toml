@@ -19,13 +19,6 @@ statrs = "0.13.0"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3.2"
 
-[dev-dependencies]
-criterion = "0.3.3"
-
-[[bench]]
-name = "my_benchmark"
-harness = false
-
 [profile.release]
 debug-assertions = false
 debug = false
