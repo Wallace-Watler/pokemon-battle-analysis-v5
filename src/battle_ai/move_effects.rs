@@ -54,10 +54,7 @@ impl Action {
                 }
             },
             Action::Nop => false,
-            Action::Switch { .. } => match self {
-                Action::Nop => true,
-                _ => false
-            }
+            Action::Switch { .. } => matches!(self, Action::Nop)
         }
     }
 
