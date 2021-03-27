@@ -1,18 +1,19 @@
+use std::fs;
+use std::iter;
+use std::time::Instant;
+
+use csv::WriterBuilder;
 #[cfg(not(target_env = "msvc"))]
 use jemallocator::Jemalloc;
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 
+use pokemon_battle_analysis_v5::battle_ai::pokemon::TeamBuild;
+use pokemon_battle_analysis_v5::battle_ai::state;
 use pokemon_battle_analysis_v5::combinatorial_optim::Solver;
 use pokemon_battle_analysis_v5::GameVersion;
 use pokemon_battle_analysis_v5::move_;
 use pokemon_battle_analysis_v5::species;
-use csv::WriterBuilder;
-use rand::SeedableRng;
-use rand::prelude::StdRng;
-use std::fs;
-use std::iter;
-use std::time::Instant;
-use pokemon_battle_analysis_v5::battle_ai::pokemon::TeamBuild;
-use pokemon_battle_analysis_v5::battle_ai::state;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -30,7 +31,7 @@ fn main() {
 
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
 
-    let num_battles = 1;
+    let num_battles = 20;
     let meta: Vec<TeamBuild> = iter::repeat_with(|| TeamBuild::new(&mut rng)).take(2 * num_battles).collect();
     let start_time = Instant::now();
     for i in 0..num_battles {
@@ -39,6 +40,9 @@ fn main() {
     }
     println!("Elapsed time: {:?}", start_time.elapsed());
     println!("Num state copies: {:?}", unsafe { state::NUM_STATE_COPIES });
+    println!("Avg time per state: {:?}", unsafe {
+        start_time.elapsed().as_nanos() / state::NUM_STATE_COPIES as u128
+    });
 
     /*let mut solver = match fs::read_to_string("solver_state.json") {
         Ok(solver_json) => serde_json::from_str(solver_json.as_str()).unwrap(),
