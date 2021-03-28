@@ -17,7 +17,7 @@ fn single_battle(num_samples: u32) {
     let start_time = Instant::now();
     for i in 0..num_samples as usize {
         println!("{}", i);
-        state::run_battle(&teams[i], &teams[i + 1], &mut rng);
+        state::run_battle(&teams[i], &teams[i + num_samples as usize], &mut rng);
     }
 
     let dur = start_time.elapsed();
