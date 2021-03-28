@@ -10,7 +10,6 @@ use crate::battle_ai::move_effects::Action;
 use crate::move_::{MoveID, Move};
 use crate::battle_ai::state::State;
 
-// TODO: Store species, gender, nature, ivs, and evs separately since they never change during a battle?
 #[derive(Clone, Debug)]
 /// Assumed to be level 100.
 pub struct Pokemon {
@@ -93,8 +92,8 @@ impl Pokemon {
         self.field_position
     }
 
-    pub fn known_move(&self, move_index: u8) -> &MoveInstance {
-        &self.known_moves[move_index as usize]
+    pub fn known_move(&self, move_index: usize) -> &MoveInstance {
+        &self.known_moves[move_index]
     }
 
     pub fn known_moves(&self) -> &[MoveInstance] {
@@ -105,22 +104,14 @@ impl Pokemon {
         self.first_type == type_ || self.second_type == type_
     }
 
-    // TODO: Can move_index be usize instead of Option?
-    pub fn can_choose_move(&self, move_index: Option<u8>) -> bool {
-        if self.current_hp == 0 || self.field_position == None { return false; }
-        match move_index {
-            Some(move_index) => {
-                let move_instance = &self.known_moves[move_index as usize];
-                move_instance.pp > 0 && !move_instance.disabled
-            }
-            None => true
-        }
+    pub fn can_choose_move(&self, move_index: usize) -> bool {
+        let move_instance = &self.known_moves[move_index];
+        self.current_hp > 0 && self.field_position.is_some() && move_instance.pp > 0 && !move_instance.disabled
     }
 }
 
 impl From<&PokemonBuild> for Pokemon {
     fn from(pb: &PokemonBuild) -> Self {
-        let max_hp = 2 * Species::base_stat(pb.species, StatIndex::Hp) as u16 + pb.ivs[StatIndex::Hp.as_usize()] as u16 + pb.evs[StatIndex::Hp.as_usize()] as u16 / 4 + 110;
         Pokemon {
             species: pb.species,
             first_type: Species::type1(pb.species),
@@ -130,8 +121,8 @@ impl From<&PokemonBuild> for Pokemon {
             ability: pb.ability,
             ivs: pb.ivs,
             evs: pb.ivs,
-            max_hp,
-            current_hp: max_hp,
+            max_hp: pb.max_hp(),
+            current_hp: pb.max_hp(),
             stat_stages: [0; 8],
             major_status_ailment: MajorStatusAilment::Okay,
             msa_counter: 0,
@@ -236,6 +227,10 @@ impl PokemonBuild {
 
     pub fn moves(&self) -> &[MoveID] {
         &self.moves
+    }
+
+    pub fn max_hp(&self) -> u16 {
+        2 * Species::base_stat(self.species, StatIndex::Hp) as u16 + self.ivs[StatIndex::Hp.as_usize()] as u16 + self.evs[StatIndex::Hp.as_usize()] as u16 / 4 + 110
     }
 }
 
@@ -498,8 +493,8 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
     }
     match field_position {
         FieldPosition::Min => {
-            match state.min_pokemon_id {
-                None => { state.min_pokemon_id = Some(pokemon_id); }
+            match state.min.on_field {
+                None => { state.min.on_field = Some(pokemon_id); }
                 Some(min_pokemon_id) => {
                     let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
                     panic!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(min_pokemon_id));
@@ -507,8 +502,8 @@ pub fn add_to_field(state: &mut State, pokemon_id: u8, field_position: FieldPosi
             }
         }
         FieldPosition::Max => {
-            match state.max_pokemon_id {
-                None => { state.max_pokemon_id = Some(pokemon_id); }
+            match state.max.on_field {
+                None => { state.max.on_field = Some(pokemon_id); }
                 Some(max_pokemon_id) => {
                     let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
                     panic!("Tried to add {} to position {:?} occupied by {}", pokemon_display_text, field_position, state.pokemon_by_id(max_pokemon_id));
@@ -542,10 +537,10 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
         state.add_display_text(format!("Removing {} from field position {:?}.", pokemon_display_text, old_field_pos));
     }
 
-    if state.min_pokemon_id == Some(pokemon_id) {
-        state.min_pokemon_id = None;
-    } else if state.max_pokemon_id == Some(pokemon_id) {
-        state.max_pokemon_id = None;
+    if state.min.on_field == Some(pokemon_id) {
+        state.min.on_field = None;
+    } else if state.max.on_field == Some(pokemon_id) {
+        state.max.on_field = None;
     } else {
         let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
         panic!(format!("ID of {} does not match any ID on the field.", pokemon_display_text));
@@ -578,7 +573,7 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
 }
 
 /// Returns whether the poisoning was successful.
-pub fn poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
+pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -> bool {
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
 
     if !corrosion && (pokemon.is_type(Type::Poison) || pokemon.is_type(Type::Steel)) {
@@ -590,39 +585,11 @@ pub fn poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
     }
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
-        pokemon.major_status_ailment = MajorStatusAilment::Poisoned;
+        pokemon.major_status_ailment = if toxic { MajorStatusAilment::BadlyPoisoned } else { MajorStatusAilment::Poisoned };
         pokemon.msa_counter = 0;
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("{} was poisoned!", species_name));
-        }
-        return true;
-    }
-
-    if cfg!(feature = "print-battle") {
-        state.add_display_text(String::from("But it failed!"));
-    }
-    false
-}
-
-/// Returns whether the poisoning was successful.
-pub fn badly_poison(state: &mut State, pokemon_id: u8, corrosion: bool) -> bool {
-    let pokemon = state.pokemon_by_id_mut(pokemon_id);
-
-    if !corrosion && (pokemon.is_type(Type::Poison) || pokemon.is_type(Type::Steel)) {
-        if cfg!(feature = "print-battle") {
-            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
-        }
-        return false;
-    }
-
-    if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
-        pokemon.major_status_ailment = MajorStatusAilment::BadlyPoisoned;
-        pokemon.msa_counter = 0;
-        if cfg!(feature = "print-battle") {
-            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("{} was badly poisoned!", species_name));
+            state.add_display_text(format!("{} was {}poisoned!", species_name, if toxic { "badly " } else { "" }));
         }
         return true;
     }

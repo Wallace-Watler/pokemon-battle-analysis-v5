@@ -24,38 +24,50 @@ pub static mut NUM_STATE_COPIES: u64 = 0;
 pub struct State {
     /// ID is the index; IDs 0-5 is the minimizing team, 6-11 is the maximizing team.
     pokemon: [Pokemon; 12],
-    /// Pokemon of the minimizing team that is on the field.
-    pub min_pokemon_id: Option<u8>,
-    /// Pokemon of the maximizing team that is on the field.
-    pub max_pokemon_id: Option<u8>,
+    pub max: Agent,
+    pub min: Agent,
     pub weather: Weather,
     pub terrain: Terrain,
     turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
     display_text: Vec<String>,
-    children: Vec<Option<Box<State>>>, // TODO: Box necessary?
-    max: AgentMetadata,
-    min: AgentMetadata,
+    children: Vec<Option<Box<State>>>,
 }
 
 impl State {
-    fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain, rng: &mut StdRng) -> State {
-        let mut state = State {
+    fn new(pokemon: [Pokemon; 12], weather: Weather, terrain: Terrain) -> State {
+        State {
             pokemon,
-            min_pokemon_id: None,
-            max_pokemon_id: None,
+            max: Agent {
+                on_field: None,
+                actions: vec![
+                    Action::Switch {
+                        user_id: None,
+                        switching_in_id: 6,
+                        target_position: FieldPosition::Max
+                    }
+                ],
+                action_order: vec![0],
+                consecutive_switches: 0
+            },
+            min: Agent {
+                on_field: None,
+                actions: vec![
+                    Action::Switch {
+                        user_id: None,
+                        switching_in_id: 0,
+                        target_position: FieldPosition::Min
+                    }
+                ],
+                action_order: vec![0],
+                consecutive_switches: 0
+            },
             weather,
             terrain,
             turn_number: 0,
             display_text: Vec::new(),
-            children: Vec::new(),
-            max: AgentMetadata::new(),
-            min: AgentMetadata::new(),
-        };
-
-        generate_actions(&mut state, rng);
-
-        state
+            children: vec![None; 1]
+        }
     }
 
     pub const fn pokemon_by_id(&self, pokemon_id: u8) -> &Pokemon {
@@ -82,23 +94,23 @@ impl State {
 
         State {
             pokemon: self.pokemon.clone(),
-            min_pokemon_id: self.min_pokemon_id,
-            max_pokemon_id: self.max_pokemon_id,
+            max: Agent {
+                on_field: self.max.on_field,
+                actions: Vec::new(),
+                action_order: Vec::new(),
+                consecutive_switches: self.max.consecutive_switches
+            },
+            min: Agent {
+                on_field: self.min.on_field,
+                actions: Vec::new(),
+                action_order: Vec::new(),
+                consecutive_switches: self.min.consecutive_switches
+            },
             weather: self.weather,
             terrain: self.terrain,
             turn_number: self.turn_number,
             display_text: Vec::new(),
             children: Vec::new(),
-            max: AgentMetadata {
-                actions: Vec::new(),
-                action_order: Vec::new(),
-                consecutive_switches: self.max.consecutive_switches
-            },
-            min: AgentMetadata {
-                actions: Vec::new(),
-                action_order: Vec::new(),
-                consecutive_switches: self.min.consecutive_switches
-            },
         }
     }
 
@@ -150,20 +162,12 @@ impl State {
 }
 
 #[derive(Clone, Debug)]
-struct AgentMetadata {
+pub struct Agent {
+    /// Pokemon owned by this agent that is on the field
+    pub on_field: Option<u8>,
     actions: Vec<Action>,
     action_order: Vec<usize>,
     consecutive_switches: u16
-}
-
-impl AgentMetadata {
-    const fn new() -> AgentMetadata {
-        AgentMetadata {
-            actions: Vec::new(),
-            action_order: Vec::new(),
-            consecutive_switches: 0
-        }
-    }
 }
 
 /// Run a battle from an initial state; the maximizer and minimizer use game theory to choose their actions. All
@@ -192,7 +196,7 @@ pub fn run_battle(minimizer: &TeamBuild, maximizer: &TeamBuild, rng: &mut StdRng
                            Pokemon::from(max_team.next().unwrap()),
                            Pokemon::from(max_team.next().unwrap())
                        ]
-                   }, Weather::default(), Terrain::default(), rng));
+                   }, Weather::default(), Terrain::default()));
 
     if cfg!(feature = "print-battle") {
         println!("<<<< BATTLE BEGIN >>>>");
@@ -306,7 +310,7 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
 }
 
 fn generate_actions(state: &mut State, rng: &mut StdRng) {
-    match state.min_pokemon_id.zip(state.max_pokemon_id) {
+    match state.min.on_field.zip(state.max.on_field) {
         None => agents_choose_pokemon_to_send_out(state),
         Some((max_pokemon_id, min_pokemon_id)) => { // Agents must choose actions for each Pokemon
             let max_actions = gen_actions_for_user(state, rng, max_pokemon_id);
@@ -327,7 +331,7 @@ fn generate_actions(state: &mut State, rng: &mut StdRng) {
 }
 
 fn agents_choose_pokemon_to_send_out(state: &mut State) {
-    state.max.actions = match state.max_pokemon_id {
+    state.max.actions = match state.max.on_field {
         None => (6..12)
             .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
             .map(|id| Action::Switch {
@@ -338,7 +342,7 @@ fn agents_choose_pokemon_to_send_out(state: &mut State) {
         Some(_) => vec![Action::Nop]
     };
 
-    state.min.actions = match state.min_pokemon_id {
+    state.min.actions = match state.min.on_field {
         None => (0..6)
             .filter(|id| state.pokemon_by_id(*id).current_hp() > 0)
             .map(|id| Action::Switch {
@@ -365,13 +369,13 @@ fn gen_actions_for_user(state: &mut State, rng: &mut StdRng, user_id: u8) -> Vec
     }
 
     let user = state.pokemon_by_id(user_id);
-    for move_index in 0..user.known_moves().len() as u8 {
-        if user.can_choose_move(Some(move_index)) {
+    for move_index in 0..user.known_moves().len() {
+        if user.can_choose_move(move_index) {
             let move_ = user.known_move(move_index).move_();
             actions.push(Action::Move {
                 user_id,
                 move_,
-                move_index: Some(move_index),
+                move_index: Some(move_index as u8),
                 target_positions: [FieldPosition::Min, FieldPosition::Max].iter().copied()
                     .filter(|field_pos| Move::targeting(move_).can_hit(user.field_position().unwrap(), *field_pos)).collect(),
             });
@@ -441,20 +445,22 @@ fn action_cmp(act1: &Action, act2: &Action) -> Ordering {
     }
 }
 
-// TODO: Pass actions directly without using queues
 fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut StdRng) {
-    let turn_number = state.turn_number;
-    if cfg!(feature = "print-battle") {
-        state.add_display_text(format!("---- Turn {} ----", turn_number));
+    // Only advance turn counter if all agents are actually doing something
+    if !action_queue.iter().any(|act| matches!(act, Action::Nop)) {
+        if cfg!(feature = "print-battle") {
+            let turn_number = state.turn_number;
+            state.add_display_text(format!("---- Turn {} ----", turn_number));
+        }
+
+        for id in 0..12 {
+            pokemon::increment_msa_counter(state, id);
+        }
+
+        state.turn_number += 1;
     }
 
-    for id in 0..12 {
-        pokemon::increment_msa_counter(state, id);
-    }
-
-    if action_queue.len() == 2 && action_queue[1].outspeeds(state, action_queue[0], rng) {
-        action_queue.swap(0, 1);
-    }
+    action_queue.sort_unstable_by(|act1, act2| Action::action_queue_ordering(state, rng, act1, act2));
 
     while !action_queue.is_empty() {
         let action = action_queue.remove(0);
@@ -464,58 +470,56 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
     }
 
     // End of turn effects (order is randomized to avoid bias)
-    let pokemon_ids = if rng.gen_bool(0.5) {
-        vec![state.min_pokemon_id, state.max_pokemon_id]
+    let pokemon_on_field = if rng.gen_bool(0.5) {
+        vec![state.min.on_field, state.max.on_field]
     } else {
-        vec![state.max_pokemon_id, state.min_pokemon_id]
+        vec![state.max.on_field, state.min.on_field]
     };
 
-    for pokemon_id in pokemon_ids {
-        if let Some(pokemon_id) = pokemon_id {
-            match state.pokemon[pokemon_id as usize].major_status_ailment() {
+    for on_field in pokemon_on_field {
+        if let Some(on_field) = on_field {
+            match state.pokemon[on_field as usize].major_status_ailment() {
                 MajorStatusAilment::Poisoned => {
                     if cfg!(feature = "print-battle") {
-                        let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
+                        let display_text = format!("{} takes damage from poison!", state.pokemon[on_field as usize]);
                         state.add_display_text(display_text);
                     }
-                    if pokemon::apply_damage(state, pokemon_id, max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16) {
+                    if pokemon::apply_damage(state, on_field, max(state.pokemon[on_field as usize].max_hp() / 8, 1) as i16) {
                         return;
                     }
                 }
                 MajorStatusAilment::BadlyPoisoned => {
                     if cfg!(feature = "print-battle") {
-                        let display_text = format!("{} takes damage from poison!", state.pokemon[pokemon_id as usize]);
+                        let display_text = format!("{} takes damage from poison!", state.pokemon[on_field as usize]);
                         state.add_display_text(display_text);
                     }
                     let amount = {
-                        let pokemon = state.pokemon_by_id(pokemon_id);
+                        let pokemon = state.pokemon_by_id(on_field);
                         ((pokemon.msa_counter() + 1) * max(pokemon.max_hp() / 16, 1)) as i16
                     };
-                    if pokemon::apply_damage(state, pokemon_id, amount) {
+                    if pokemon::apply_damage(state, on_field, amount) {
                         return;
                     }
                 }
                 _ => {}
             }
 
-            if let Some(seeder_pos) = state.pokemon[pokemon_id as usize].seeded_by {
+            if let Some(seeder_pos) = state.pokemon[on_field as usize].seeded_by {
                 let seeder_id = match seeder_pos {
-                    FieldPosition::Min => state.min_pokemon_id,
-                    FieldPosition::Max => state.max_pokemon_id
+                    FieldPosition::Min => state.min.on_field,
+                    FieldPosition::Max => state.max.on_field
                 };
                 if let Some(seeder_id) = seeder_id {
                     if cfg!(feature = "print-battle") {
-                        let display_text = format!("{}'s seed drains energy from {}!", state.pokemon[seeder_id as usize], state.pokemon[pokemon_id as usize]);
+                        let display_text = format!("{}'s seed drains energy from {}!", state.pokemon[seeder_id as usize], state.pokemon[on_field as usize]);
                         state.add_display_text(display_text);
                     }
-                    let transferred_hp = max(state.pokemon[pokemon_id as usize].max_hp() / 8, 1) as i16;
-                    if pokemon::apply_damage(state, pokemon_id, transferred_hp) || pokemon::apply_damage(state, seeder_id, -transferred_hp) {
+                    let transferred_hp = max(state.pokemon[on_field as usize].max_hp() / 8, 1) as i16;
+                    if pokemon::apply_damage(state, on_field, transferred_hp) || pokemon::apply_damage(state, seeder_id, -transferred_hp) {
                         return;
                     }
                 }
             }
         }
     }
-
-    state.turn_number += 1;
 }

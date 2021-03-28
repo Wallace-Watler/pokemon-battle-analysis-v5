@@ -6,7 +6,7 @@ use crate::battle_ai::state::State;
 use rand::prelude::StdRng;
 use rand::Rng;
 use serde::Deserialize;
-use std::cmp::{min, max};
+use std::cmp::{min, max, Ordering};
 use std::fmt::Debug;
 
 /// An action selection that will be queued and executed during a turn.
@@ -30,31 +30,44 @@ pub enum Action {
 }
 
 impl Action {
-    /**
-     * @param state - a game state
-     * @param otherAction - some other move action
-     * @return Whether this move action should come before {@code otherAction} based on priority and the user's speed.
-     */
-    pub fn outspeeds(&self, state_box: &State, other_action: &Action, rng: &mut StdRng) -> bool {
-        match other_action {
-            Action::Move {user_id: other_user_id, move_: other_move, move_index: _, target_positions: _} => {
-                match self {
-                    Action::Move {user_id, move_, move_index: _, target_positions: _} => {
-                        let priority_stage = Move::priority_stage(*move_);
-                        let other_priority_stage = Move::priority_stage(*other_move);
-                        if priority_stage == other_priority_stage {
-                            let this_spd = pokemon::calculated_stat(state_box, *user_id, StatIndex::Spd);
-                            let other_spd = pokemon::calculated_stat(state_box, *other_user_id, StatIndex::Spd);
-                            if this_spd == other_spd { rng.gen_bool(0.5) } else { this_spd > other_spd }
-                        } else {
-                            priority_stage > other_priority_stage
+    /// Defines how the action queue should be sorted.
+    pub fn action_queue_ordering(state: &State, rng: &mut StdRng, act1: &Action, act2: &Action) -> Ordering {
+        match act1 {
+            Action::Move {user_id: user_id1, move_: move1, move_index: _, target_positions: _} => {
+                match act2 {
+                    Action::Move {user_id: user_id2, move_: move2, move_index: _, target_positions: _} => {
+                        let priority_stage1 = Move::priority_stage(*move1);
+                        let priority_stage2 = Move::priority_stage(*move2);
+                        let priority_stage_ord = priority_stage1.cmp(&priority_stage2);
+                        match priority_stage_ord {
+                            Ordering::Equal => {
+                                let spd1 = pokemon::calculated_stat(state, *user_id1, StatIndex::Spd);
+                                let spd2 = pokemon::calculated_stat(state, *user_id2, StatIndex::Spd);
+                                let spd_ord = spd1.cmp(&spd2);
+                                match spd_ord {
+                                    Ordering::Equal => if rng.gen_bool(0.5) { Ordering::Less } else { Ordering::Greater },
+                                    _ => spd_ord.reverse()
+                                }
+                            },
+                            _ => priority_stage_ord.reverse()
                         }
                     },
-                    _ => true
+                    _ => Ordering::Greater
                 }
             },
-            Action::Nop => false,
-            Action::Switch { .. } => matches!(self, Action::Nop)
+            Action::Nop => {
+                match act2 {
+                    Action::Nop => Ordering::Equal,
+                    _ => Ordering::Less
+                }
+            },
+            Action::Switch { .. } => {
+                match act2 {
+                    Action::Move { .. } => Ordering::Less,
+                    Action::Nop => Ordering::Greater,
+                    Action::Switch { .. } => if rng.gen_bool(0.5) { Ordering::Less } else { Ordering::Greater }
+                }
+            }
         }
     }
 
@@ -74,7 +87,7 @@ impl Action {
                 if user.current_hp() == 0 || user.field_position() == None { return false; }
                 match move_index {
                     Some(move_index) => {
-                        let move_instance = user.known_move(*move_index);
+                        let move_instance = user.known_move(*move_index as usize);
                         move_instance.pp > 0 && !move_instance.disabled
                     },
                     None => true
@@ -104,9 +117,9 @@ impl Action {
 
                 for target_pos in target_positions {
                     let target_id = if *target_pos == FieldPosition::Min {
-                        state.min_pokemon_id
+                        state.min.on_field
                     } else {
-                        state.max_pokemon_id
+                        state.max.on_field
                     };
 
                     match target_id {
@@ -389,7 +402,7 @@ fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
         }
         return EffectResult::Fail;
     }
-    if pokemon::poison(state, target_id, false) {
+    if pokemon::poison(state, target_id, false, false) {
         EffectResult::Success
     } else {
         EffectResult::Fail
@@ -437,7 +450,7 @@ fn synthesis(state: &mut State, user_id: u8) -> EffectResult {
 }
 
 fn toxic(state: &mut State, target_id: u8) -> EffectResult {
-    if pokemon::badly_poison(state, target_id, false) {
+    if pokemon::poison(state, target_id, true, false) {
         EffectResult::Success
     } else {
         EffectResult::Fail
