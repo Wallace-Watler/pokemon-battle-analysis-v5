@@ -13,7 +13,7 @@ use crate::battle_ai::state::State;
 #[derive(Clone, Debug)]
 /// Assumed to be level 100.
 pub struct Pokemon {
-    species: SpeciesID,
+    pub species: SpeciesID,
     // Types usually match the species' type, but some Pokemon can change types
     first_type: Type,
     second_type: Type,
@@ -543,7 +543,7 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
         state.max.on_field = None;
     } else {
         let pokemon_display_text = format!("{}", state.pokemon_by_id(pokemon_id));
-        panic!(format!("ID of {} does not match any ID on the field.", pokemon_display_text));
+        panic!("ID of {} does not match any ID on the field.", pokemon_display_text);
     }
 }
 
@@ -589,7 +589,7 @@ pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -
         pokemon.msa_counter = 0;
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("{} was {}poisoned!", species_name, if toxic { "badly " } else { "" }));
+            state.add_display_text(format!("{}{}", species_name, if toxic { MajorStatusAilment::BadlyPoisoned.display_text_when_applied() } else { MajorStatusAilment::Poisoned.display_text_when_applied() }));
         }
         return true;
     }
@@ -601,15 +601,23 @@ pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -
 }
 
 /// Returns whether the Pokemon fell asleep.
-pub fn put_to_sleep(state: &mut State, pokemon_id: u8) -> bool {
+pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> bool {
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
         pokemon.major_status_ailment = MajorStatusAilment::Asleep;
         pokemon.msa_counter = 0;
+        pokemon.msa_counter_target = Some(
+            match game_version().gen() {
+                1 => rng.gen_range(1, 7),
+                2 => rng.gen_range(1, 5),
+                3..=4 => rng.gen_range(2, 5),
+                _ => rng.gen_range(1, 3)
+            }
+        );
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("{} fell asleep!", species_name));
+            state.add_display_text(format!("{}{}", species_name, MajorStatusAilment::Asleep.display_text_when_applied()));
         }
         return true;
     }

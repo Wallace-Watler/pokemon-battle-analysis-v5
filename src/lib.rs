@@ -283,6 +283,18 @@ pub enum MajorStatusAilment {
 }
 
 impl MajorStatusAilment {
+    const fn display_text_when_applied(&self) -> &'static str {
+        match self {
+            MajorStatusAilment::Okay => "",
+            MajorStatusAilment::Asleep => " fell asleep!",
+            MajorStatusAilment::Poisoned => " was poisoned!",
+            MajorStatusAilment::BadlyPoisoned => " was badly poisoned!",
+            MajorStatusAilment::Paralyzed => " was paralyzed!",
+            MajorStatusAilment::Burned => " was burned!",
+            MajorStatusAilment::Frozen => " was frozen!"
+        }
+    }
+
     const fn display_text_when_cured(&self) -> &'static str {
         match self {
             MajorStatusAilment::Okay => "",

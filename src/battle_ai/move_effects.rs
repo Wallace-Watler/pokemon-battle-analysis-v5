@@ -181,7 +181,7 @@ impl MoveEffect {
             },
             MoveEffect::LeechSeed => leech_seed(state, user_id, target_id),
             MoveEffect::PoisonPowder => poison_powder(state, target_id),
-            MoveEffect::SleepPowder => sleep_powder(state, target_id),
+            MoveEffect::SleepPowder => sleep_powder(state, target_id, rng),
             MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
                 std_damage(state, user_id, target_id, *damage_type, Move::category(move_), *power, *critical_hit_stage_bonus, *recoil_divisor, rng)
             },
@@ -409,7 +409,7 @@ fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
     }
 }
 
-fn sleep_powder(state: &mut State, target_id: u8) -> EffectResult {
+fn sleep_powder(state: &mut State, target_id: u8, rng: &mut StdRng) -> EffectResult {
     if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(target_id).species());
@@ -417,7 +417,7 @@ fn sleep_powder(state: &mut State, target_id: u8) -> EffectResult {
         }
         return EffectResult::Fail;
     }
-    if pokemon::put_to_sleep(state, target_id) {
+    if pokemon::put_to_sleep(state, target_id, rng) {
         EffectResult::Success
     } else {
         EffectResult::Fail
