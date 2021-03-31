@@ -1,10 +1,11 @@
 use rand::prelude::StdRng;
-use rand_distr::{StudentT, Distribution};
 use serde::{Deserialize, Serialize};
 use crate::battle_ai::pokemon::TeamBuild;
 use crate::battle_ai::state;
 use rand::Rng;
+use rand::distributions::Distribution;
 use std::iter;
+use statrs::distribution::{Normal, Univariate, StudentsT};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Solution {
@@ -47,20 +48,32 @@ impl Solution {
 
     /// Returns the probability that this solution performs worse than `other`.
     fn prob_worse_than(&self, other: &Solution, rng: &mut StdRng) -> f64 {
-        // TODO: Use normal dist if num_samples > 30 for both solutions, and store t dists 1 - 29
-        let t_dist_1 = StudentT::new((self.num_samples - 1) as f64).unwrap();
-        let t_dist_2 = StudentT::new((other.num_samples - 1) as f64).unwrap();
-
-        const MONTE_CARLO_NUM: usize = 100000;
-        let mut count = 0;
-        for _ in 0..MONTE_CARLO_NUM {
-            let t_sample_1 = t_dist_1.sample(rng) * self.fit_variance.sqrt() + self.fitness;
-            let t_sample_2 = t_dist_2.sample(rng) * other.fit_variance.sqrt() + other.fitness;
-            if t_sample_1 - t_sample_2 < 0.0 {
-                count += 1;
+        if almost::zero(self.fit_variance) && almost::zero(other.fit_variance) {
+            return if self.fitness > other.fitness {
+                0.0
+            } else if self.fitness < other.fitness {
+                1.0
+            } else {
+                0.5
             }
         }
-        count as f64 / MONTE_CARLO_NUM as f64
+
+        if self.num_samples > 30 && other.num_samples > 30 {
+            Normal::new(self.fitness - other.fitness, (self.fit_variance + other.fit_variance).sqrt()).unwrap().cdf(0.0)
+        } else {
+            let t_dist_1 = StudentsT::new(self.fitness, self.fit_variance.sqrt(), (self.num_samples - 1) as f64).unwrap();
+            let t_dist_2 = StudentsT::new(other.fitness, other.fit_variance.sqrt(), (other.num_samples - 1) as f64).unwrap();
+
+            const MONTE_CARLO_NUM: usize = 100000;
+            let mut count = 0;
+            for _ in 0..MONTE_CARLO_NUM {
+                if t_dist_1.sample(rng) - t_dist_2.sample(rng) < 0.0 {
+                    count += 1;
+                }
+            }
+
+            count as f64 / MONTE_CARLO_NUM as f64
+        }
     }
 }
 

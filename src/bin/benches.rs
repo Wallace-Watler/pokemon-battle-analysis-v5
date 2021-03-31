@@ -6,8 +6,9 @@ use std::ops::Div;
 use std::time::Instant;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use pokemon_battle_analysis_v5::combinatorial_optim::Solver;
 
-fn single_battle(num_samples: u32) {
+fn _single_battle(num_samples: u32) {
     let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
     let teams: Vec<TeamBuild> = iter::repeat_with(|| TeamBuild::new(&mut rng))
         .take(2 * num_samples as usize)
@@ -32,6 +33,24 @@ fn single_battle(num_samples: u32) {
     println!("Avg time per state: {:?}ns\n", dur.as_nanos() / nsc as u128);
 }
 
+fn _combinatorial_optim(iters: u32) {
+    let mut rng: StdRng = SeedableRng::from_seed([0; 32]);
+    let mut solver = Solver::new(&mut rng);
+
+    let start_time = Instant::now();
+    for i in 0..iters {
+        println!("Iters: {}", i);
+        solver.do_iter(&mut rng);
+    }
+
+    let dur = start_time.elapsed();
+    println!("---- Combinatorial Optimization ----");
+    println!("AI level: {:?}", state::AI_LEVEL);
+    println!("Iterations: {:?}", iters);
+    println!("Elapsed time: {:?}", dur);
+    println!("Avg time per iteration: {:?}", dur.div(iters));
+}
+
 fn main() {
     unsafe {
         pokemon_battle_analysis_v5::GAME_VERSION = GameVersion::XY;
@@ -39,5 +58,6 @@ fn main() {
         species::initialize_species();
     }
 
-    single_battle(30);
+    //_single_battle(30);
+    //_combinatorial_optim(30);
 }
