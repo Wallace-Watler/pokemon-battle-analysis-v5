@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::fmt::Debug;
 use std::intrinsics::transmute;
+use std::ops::AddAssign;
+use num::{Zero, One};
 
 pub mod battle_ai;
 pub mod move_;
@@ -14,11 +16,6 @@ pub mod combinatorial_optim;
 pub static mut GAME_VERSION: GameVersion = GameVersion::SS;
 
 fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
-
-fn clamp<T: PartialOrd + Debug>(i: T, min: T, max: T) -> T {
-    if min > max { panic!(format!("min must not be greater than max. (min, max): ({:?}, {:?})", min, max)) }
-    if i < min { min } else if i > max { max } else { i }
-}
 
 fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
     if weights.is_empty() || weights.iter().any(|d| !almost::zero(*d) && *d < 0.0) {
@@ -149,14 +146,46 @@ impl Default for Terrain {
 #[repr(u8)]
 pub enum Weather {
     None,
-    Sunshine,
     HarshSunshine,
+    ExtremelyHarshSunshine,
     Rain,
     HeavyRain,
     Hail,
     Sandstorm,
     StrongWinds,
     Fog
+}
+
+impl Weather {
+    const fn display_text_on_appearance(&self) -> &'static str {
+        // TODO: Make these the proper phrases
+        match self {
+            Weather::None => "",
+            Weather::HarshSunshine => "It became sunny!",
+            Weather::ExtremelyHarshSunshine => "The sunlight became intense!",
+            Weather::Rain => "It started to rain!",
+            Weather::HeavyRain => "It started to rain heavily!",
+            Weather::Hail => "It started to hail!",
+            Weather::Sandstorm => "A sandstorm kicked up!",
+            Weather::StrongWinds => "It became windy!",
+            Weather::Fog => "A fog set in!"
+        }
+    }
+
+    const fn display_text_on_disappearance(&self) -> &'static str {
+        // TODO: Make these the proper phrases
+        match self {
+            Weather::None => "",
+            Weather::HarshSunshine => "The sunlight subsided.",
+            Weather::ExtremelyHarshSunshine => "The sunlight subsided.",
+            Weather::Rain => "The rain subsided.",
+            Weather::HeavyRain => "The rain subsided.",
+            Weather::Hail => "The hail subsided.",
+            Weather::Sandstorm => "The sandstorm subsided.",
+            Weather::StrongWinds => "The winds subsided.",
+            Weather::Fog => "The fog subsided."
+        }
+    }
 }
 
 impl Default for Weather {
@@ -425,5 +454,52 @@ impl StatIndex {
             StatIndex::Acc => 6,
             StatIndex::Eva => 7
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Counter<T> {
+    value: T,
+    target: Option<T>
+}
+
+impl<T: AddAssign + PartialOrd + One + Zero> Counter<T> {
+    fn new(target: Option<T>) -> Counter<T> {
+        Counter {
+            value: T::zero(),
+            target
+        }
+    }
+
+    /// Sets the value to zero and the target to None.
+    fn clear(&mut self) {
+        self.value.set_zero();
+        self.target = None;
+    }
+
+    /// Sets the value to zero.
+    fn zero(&mut self) {
+        self.value.set_zero()
+    }
+
+    /// Returns whether the target value was reached as a result of incrementing.
+    /// Clears the counter if it did.
+    fn inc(&mut self) -> bool {
+        self.add(T::one())
+    }
+
+    /// Returns whether the target value was reached as a result of the addition.
+    /// Clears the counter if it did.
+    fn add(&mut self, amount: T) -> bool {
+        self.value += amount;
+
+        if let Some(target) = &self.target {
+            if self.value >= *target {
+                self.clear();
+                return true;
+            }
+        }
+
+        false
     }
 }

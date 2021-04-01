@@ -1,5 +1,31 @@
 [
     {
+        "name": "Double Team",
+        "type": "Normal",
+        "category": "Status",
+        "accuracy": "Ignore",
+        "targeting": "User",
+        "max_pp": 15,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "IncTargetStatStage": ["Eva", 1] }
+        ]
+    },
+    {
+        "name": "Giga Drain",
+        "type": "Grass",
+        "category": "Special",
+        "accuracy": { "Standard": 100 },
+        "targeting": "SingleAdjacentPokemon",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "GigaDrain"
+        ]
+    },
+    {
         "name": "Growl",
         "type": "Normal",
         "category": "Status",
@@ -61,7 +87,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Grass", 55, 1, 0] }
+            { "StdDamage": ["Grass", 55, 1] }
         ]
     },
     {
@@ -88,6 +114,19 @@
         "sound_based": false,
         "effects": [
             "Struggle"
+        ]
+    },
+    {
+        "name": "Sunny Day",
+        "type": "Fire",
+        "category": "Status",
+        "accuracy": "Ignore",
+        "targeting": "AllPokemon",
+        "max_pp": 5,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            "SunnyDay"
         ]
     },
     {
@@ -126,7 +165,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Normal", 50, 0, 0] }
+            { "StdDamage": ["Normal", 50, 0] }
         ]
     },
     {
@@ -152,7 +191,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Grass", 45, 0, 0] }
+            { "StdDamage": ["Grass", 45, 0] }
         ]
     }
 ]

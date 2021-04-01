@@ -1,5 +1,5 @@
 use crate::battle_ai::pokemon;
-use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, clamp, Weather};
+use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, Weather, Counter};
 use crate::move_::{MoveCategory, MoveID, Move};
 use crate::species::Species;
 use crate::battle_ai::state::State;
@@ -158,15 +158,17 @@ impl Action {
 
 #[derive(Debug, Deserialize)]
 pub enum MoveEffect {
+    GigaDrain,
     Growth,
     /// (stat_index: StatIndex, amount: i8)
     IncTargetStatStage(StatIndex, i8),
     LeechSeed,
     PoisonPowder,
     SleepPowder,
-    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8)
-    StdDamage(Type, u8, u8, u8),
+    /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8)
+    StdDamage(Type, u8, u8),
     Struggle,
+    SunnyDay,
     Synthesis,
     Toxic
 }
@@ -174,6 +176,7 @@ pub enum MoveEffect {
 impl MoveEffect {
     fn do_effect(&self, move_: MoveID, state: &mut State, action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
         match self {
+            MoveEffect::GigaDrain => giga_drain(state, user_id, target_id, rng),
             MoveEffect::Growth => growth(state, user_id),
             MoveEffect::IncTargetStatStage(stat_index, amount) => {
                 pokemon::increment_stat_stage(state, target_id, *stat_index, *amount);
@@ -182,10 +185,11 @@ impl MoveEffect {
             MoveEffect::LeechSeed => leech_seed(state, user_id, target_id),
             MoveEffect::PoisonPowder => poison_powder(state, target_id),
             MoveEffect::SleepPowder => sleep_powder(state, target_id, rng),
-            MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus, recoil_divisor) => {
-                std_damage(state, user_id, target_id, *damage_type, Move::category(move_), *power, *critical_hit_stage_bonus, *recoil_divisor, rng)
+            MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus) => {
+                std_damage(state, user_id, target_id, *damage_type, Move::category(move_), *power, *critical_hit_stage_bonus, rng).0
             },
             MoveEffect::Struggle => struggle(state, user_id, target_id, rng),
+            MoveEffect::SunnyDay => sunny_day(state),
             MoveEffect::Synthesis => synthesis(state, user_id),
             MoveEffect::Toxic => toxic(state, target_id)
         }
@@ -223,7 +227,7 @@ impl MoveAccuracy {
     fn std_accuracy_check(state: &mut State, accuracy: u8, user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
         let user = state.pokemon_by_id(user_id);
         let target = state.pokemon_by_id(target_id);
-        rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
+        rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(num::clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
     }
 }
 
@@ -254,7 +258,7 @@ fn std_base_damage(power: u8, calculated_atk: u32, calculated_def: u32, offensiv
 
 // ---- MOVE EFFECTS ---- //
 
-fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u8, critical_hit_stage_bonus: u8, recoil_divisor: u8, rng: &mut StdRng) -> EffectResult {
+fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, category: MoveCategory, power: u8, critical_hit_stage_bonus: u8, rng: &mut StdRng) -> (EffectResult, u16) {
     let target_first_type;
     let target_second_type;
     let offensive_stat_index = if category == MoveCategory::Physical { StatIndex::Atk } else { StatIndex::SpAtk };
@@ -284,7 +288,7 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
             let target_name = Species::name(state.pokemon_by_id(target_id).species());
             state.add_display_text(format!("It doesn't affect the opponent's {}...", target_name));
         }
-        return EffectResult::Fail;
+        return (EffectResult::Fail, 0);
     }
 
     let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
@@ -315,6 +319,14 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
         std_base_damage(power, calculated_atk, calculated_def, offensive_stat_stage, defensive_stat_stage, false) as f64
     };
 
+    if state.weather == Weather::HarshSunshine {
+        modified_damage *= match damage_type {
+            Type::Fire => 1.5,
+            Type::Water => 0.5,
+            _ => 1.0
+        };
+    }
+
     modified_damage *= (100 - rng.gen_range(0, 16)) as f64 / 100.0;
     if damage_type != Type::None && state.pokemon_by_id(user_id).is_type(damage_type) {
         modified_damage *= 1.5;
@@ -330,29 +342,47 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
     if user_major_status_ailment == MajorStatusAilment::Burned { modified_damage *= 0.5; }
     modified_damage = modified_damage.max(1.0);
 
-    let damage_dealt = modified_damage.round() as i16;
-    if pokemon::apply_damage(state, target_id, damage_dealt) {
-        return EffectResult::BattleEnded;
+    let damage_dealt = modified_damage.round() as u16;
+    if pokemon::apply_damage(state, target_id, damage_dealt as i16) {
+        return (EffectResult::BattleEnded, damage_dealt);
     }
-    recoil(state, user_id, damage_dealt, recoil_divisor)
+    (EffectResult::Success, damage_dealt)
 }
 
-fn recoil(state: &mut State, user_id: u8, damage_dealt: i16, recoil_divisor: u8) -> EffectResult {
-    if recoil_divisor > 0 {
-        let recoil_damage = if game_version().gen() <= 4 {
-            max(damage_dealt / recoil_divisor as i16, 1)
-        } else {
-            max((damage_dealt as f64 / recoil_divisor as f64).round() as i16, 1)
-        };
-        if cfg!(feature = "print-battle") {
-            let user_display_text = format!("{}", state.pokemon_by_id(user_id));
-            state.add_display_text(format!("{} took recoil damage!", user_display_text));
-        }
-        if pokemon::apply_damage(state, user_id, recoil_damage) {
-            return EffectResult::BattleEnded;
-        }
+fn recoil(state: &mut State, user_id: u8, numerator: u16, denominator: u8) -> EffectResult {
+    if cfg!(feature = "print-battle") {
+        let user_name = Species::name(state.pokemon_by_id(user_id).species());
+        state.add_display_text(format!("{} took recoil damage!", user_name));
     }
-    EffectResult::Success
+
+    let recoil_damage = if game_version().gen() <= 4 {
+        max(numerator / denominator as u16, 1)
+    } else {
+        max((numerator as f64 / denominator as f64).round() as u16, 1)
+    };
+    if pokemon::apply_damage(state, user_id, recoil_damage as i16) {
+        EffectResult::BattleEnded
+    } else {
+        EffectResult::Success
+    }
+}
+
+fn giga_drain(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
+    let (result, damage_dealt) = std_damage(state, user_id, target_id, Type::Grass, MoveCategory::Special, if game_version().gen() <= 4 { 60 } else { 75 }, 0, rng);
+    if result != EffectResult::Success {
+        return result;
+    }
+
+    if cfg!(feature = "print-battle") {
+        let target_name = Species::name(state.pokemon_by_id(target_id).species());
+        state.add_display_text(format!("{} had its health drained!", target_name));
+    }
+
+    if pokemon::apply_damage(state, user_id, -max(damage_dealt as i16 / 2, 1)) {
+        EffectResult::BattleEnded
+    } else {
+        EffectResult::Success
+    }
 }
 
 fn growth(state: &mut State, user_id: u8) -> EffectResult {
@@ -425,20 +455,39 @@ fn sleep_powder(state: &mut State, target_id: u8, rng: &mut StdRng) -> EffectRes
 }
 
 fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
+    let (result, damage_dealt) = std_damage(state, user_id, target_id, Type::None, MoveCategory::Physical, 50, 0, rng);
+    if result != EffectResult::Success {
+        return result;
+    }
+
     match game_version().gen() {
-        1..=3 => {
-            std_damage(state, user_id, target_id, Type::None, MoveCategory::Physical, 50, 0, 4, rng)
-        },
-        _ => {
-            if std_damage(state, user_id, target_id, Type::None, MoveCategory::Physical, 50, 0, 0, rng) == EffectResult::BattleEnded {
-                return EffectResult::BattleEnded;
-            }
-            recoil(state, user_id, state.pokemon_by_id(user_id).max_hp() as i16, 4)
-        }
+        1..=3 => recoil(state, user_id, damage_dealt, 4),
+        _ => recoil(state, user_id, state.pokemon_by_id(user_id).max_hp(), 4)
     }
 }
 
+fn sunny_day(state: &mut State) -> EffectResult {
+    if (game_version().gen() >= 3 && state.weather == Weather::HarshSunshine) || (game_version().gen() >= 5 && matches!(state.weather, Weather::HeavyRain | Weather::ExtremelyHarshSunshine | Weather::StrongWinds)) {
+        if cfg!(feature = "print-battle") {
+            state.add_display_text(String::from("But it failed!"));
+        }
+        return EffectResult::Fail;
+    }
+
+    state.weather = Weather::HarshSunshine;
+    state.weather_counter = Counter::new(Some(5));
+    if cfg!(feature = "print-battle") {
+        state.add_display_text(String::from(Weather::HarshSunshine.display_text_on_appearance()));
+    }
+    EffectResult::Success
+}
+
 fn synthesis(state: &mut State, user_id: u8) -> EffectResult {
+    if cfg!(feature = "print-battle") {
+        let species_name = Species::name(state.pokemon_by_id(user_id).species());
+        state.add_display_text(format!("{} restored its HP!", species_name));
+    }
+
     let mut max_hp = state.pokemon_by_id(user_id).current_hp() as i16;
     match state.weather {
         Weather::None | Weather::StrongWinds => max_hp /= 2,

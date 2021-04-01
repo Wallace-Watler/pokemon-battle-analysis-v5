@@ -3,7 +3,7 @@ use std::cmp::{max, min, Ordering};
 use rand::prelude::StdRng;
 use rand::Rng;
 
-use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, Terrain, Weather};
+use crate::{choose_weighted_index, FieldPosition, MajorStatusAilment, Terrain, Weather, Counter};
 use crate::battle_ai::{game_theory, pokemon};
 use crate::battle_ai::game_theory::{Matrix, ZeroSumNashEq};
 use crate::battle_ai::move_effects::Action;
@@ -27,6 +27,7 @@ pub struct State {
     pub max: Agent,
     pub min: Agent,
     pub weather: Weather,
+    pub weather_counter: Counter<u16>,
     pub terrain: Terrain,
     turn_number: u16,
     /// Battle print-out that is shown when this state is entered; useful for sanity checks.
@@ -63,6 +64,7 @@ impl State {
                 consecutive_switches: 0
             },
             weather,
+            weather_counter: Counter::new(None),
             terrain,
             turn_number: 0,
             display_text: Vec::new(),
@@ -107,6 +109,7 @@ impl State {
                 consecutive_switches: self.min.consecutive_switches
             },
             weather: self.weather,
+            weather_counter: self.weather_counter.clone(),
             terrain: self.terrain,
             turn_number: self.turn_number,
             display_text: Vec::new(),
@@ -458,6 +461,10 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
         }
 
         state.turn_number += 1;
+        if state.weather_counter.inc() {
+            state.add_display_text(String::from(state.weather.display_text_on_disappearance()));
+            state.weather = Weather::None;
+        }
     }
 
     action_queue.sort_unstable_by(|act1, act2| Action::action_queue_ordering(state, rng, act1, act2));
@@ -495,7 +502,7 @@ fn play_out_turn(state: &mut State, mut action_queue: Vec<&Action>, rng: &mut St
                     }
                     let amount = {
                         let pokemon = state.pokemon_by_id(on_field);
-                        ((pokemon.msa_counter() + 1) * max(pokemon.max_hp() / 16, 1)) as i16
+                        ((pokemon.msa_counter.value + 1) * max(pokemon.max_hp() / 16, 1)) as i16
                     };
                     if pokemon::apply_damage(state, on_field, amount) {
                         return;

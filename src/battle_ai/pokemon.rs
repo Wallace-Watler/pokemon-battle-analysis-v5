@@ -4,7 +4,7 @@ use serde::export::TryFrom;
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
-use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, clamp, choose_weighted_index};
+use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, choose_weighted_index, Counter};
 use crate::species::{SpeciesID, Species};
 use crate::battle_ai::move_effects::Action;
 use crate::move_::{MoveID, Move};
@@ -28,16 +28,12 @@ pub struct Pokemon {
 
     // Major status ailment
     major_status_ailment: MajorStatusAilment,
-    msa_counter: u16,
-    msa_counter_target: Option<u16>,
+    pub msa_counter: Counter<u16>,
     /// Only used in gen 3; otherwise it's always 0.
     snore_sleep_talk_counter: u16,
 
     // Minor status ailments
-    /// Turn on which confusion was inflicted.
-    confusion_turn_inflicted: Option<u16>,
-    /// Turn on which confusion will be cured naturally.
-    confusion_turn_will_cure: Option<u16>,
+    confusion_counter: Counter<u16>,
     is_flinching: bool,
     /// Position of the Pokemon that seeded this Pokemon.
     pub seeded_by: Option<FieldPosition>,
@@ -84,10 +80,6 @@ impl Pokemon {
         self.major_status_ailment
     }
 
-    pub const fn msa_counter(&self) -> u16 {
-        self.msa_counter
-    }
-
     pub const fn field_position(&self) -> Option<FieldPosition> {
         self.field_position
     }
@@ -125,11 +117,12 @@ impl From<&PokemonBuild> for Pokemon {
             current_hp: pb.max_hp(),
             stat_stages: [0; 8],
             major_status_ailment: MajorStatusAilment::Okay,
-            msa_counter: 0,
-            msa_counter_target: None,
+            msa_counter: Counter {
+                value: 0,
+                target: None
+            },
             snore_sleep_talk_counter: 0,
-            confusion_turn_inflicted: None,
-            confusion_turn_will_cure: None,
+            confusion_counter: Counter::new(None),
             is_flinching: false,
             seeded_by: None,
             is_infatuated: false,
@@ -478,7 +471,7 @@ pub fn calculated_stat(state: &State, pokemon_id: u8, stat_index: StatIndex) -> 
         if pokemon.major_status_ailment == MajorStatusAilment::Paralyzed {
             calculated_stat /= if game_version().gen() <= 6 { 4 } else { 2 };
         }
-        if pokemon.ability == Ability::id_by_name("Chlorophyll").unwrap() && state.weather == Weather::Sunshine { calculated_stat *= 2; }
+        if pokemon.ability == Ability::id_by_name("Chlorophyll").unwrap() && state.weather == Weather::HarshSunshine { calculated_stat *= 2; }
     }
 
     calculated_stat
@@ -523,8 +516,11 @@ pub fn remove_from_field(state: &mut State, pokemon_id: u8) {
         let pokemon = state.pokemon_by_id_mut(pokemon_id);
         old_field_pos = pokemon.field_position.unwrap();
         pokemon.stat_stages = [0; 8];
-        if game_version().gen() == 3 { pokemon.snore_sleep_talk_counter = 0; }
-        if game_version().gen() == 5 && pokemon.major_status_ailment == MajorStatusAilment::Asleep { pokemon.msa_counter = 0; }
+        if game_version().gen() == 3 {
+            pokemon.snore_sleep_talk_counter = 0;
+        } else if game_version().gen() == 5 && pokemon.major_status_ailment == MajorStatusAilment::Asleep {
+            pokemon.msa_counter.zero();
+        }
         pokemon.field_position = None;
         for move_instance in &mut pokemon.known_moves {
             move_instance.disabled = false;
@@ -553,7 +549,7 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
     {
         let pokemon = state.pokemon_by_id_mut(pokemon_id);
         old_stat_stage = pokemon.stat_stages[stat_index.as_usize()];
-        new_stat_stage = clamp(old_stat_stage + requested_amount, -6, 6);
+        new_stat_stage = num::clamp(old_stat_stage + requested_amount, -6, 6);
         pokemon.stat_stages[stat_index.as_usize()] = new_stat_stage;
     }
 
@@ -586,7 +582,7 @@ pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
         pokemon.major_status_ailment = if toxic { MajorStatusAilment::BadlyPoisoned } else { MajorStatusAilment::Poisoned };
-        pokemon.msa_counter = 0;
+        pokemon.msa_counter.clear();
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
             state.add_display_text(format!("{}{}", species_name, if toxic { MajorStatusAilment::BadlyPoisoned.display_text_when_applied() } else { MajorStatusAilment::Poisoned.display_text_when_applied() }));
@@ -606,15 +602,14 @@ pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> bool
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
         pokemon.major_status_ailment = MajorStatusAilment::Asleep;
-        pokemon.msa_counter = 0;
-        pokemon.msa_counter_target = Some(
+        pokemon.msa_counter = Counter::new(Some(
             match game_version().gen() {
                 1 => rng.gen_range(1, 7),
                 2 => rng.gen_range(1, 5),
                 3..=4 => rng.gen_range(2, 5),
                 _ => rng.gen_range(1, 3)
             }
-        );
+        ));
         if cfg!(feature = "print-battle") {
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
             state.add_display_text(format!("{}{}", species_name, MajorStatusAilment::Asleep.display_text_when_applied()));
@@ -630,27 +625,20 @@ pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> bool
 
 pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
     let mut msa_cured = false;
+    let mut old_msa = MajorStatusAilment::Okay;
     {
         let pokemon = state.pokemon_by_id_mut(pokemon_id);
-        if let Some(msa_counter_target) = pokemon.msa_counter_target {
-            if pokemon.major_status_ailment != MajorStatusAilment::Okay {
-                pokemon.msa_counter += pokemon.snore_sleep_talk_counter as u16 + 1;
-                pokemon.snore_sleep_talk_counter = 0;
-                if pokemon.msa_counter >= msa_counter_target {
-                    msa_cured = true;
-                    pokemon.major_status_ailment = MajorStatusAilment::Okay;
-                    pokemon.msa_counter = 0;
-                    pokemon.msa_counter_target = None;
-                }
-            }
+        if pokemon.msa_counter.add(pokemon.snore_sleep_talk_counter + 1) {
+            msa_cured = true;
+            old_msa = pokemon.major_status_ailment;
+            pokemon.major_status_ailment = MajorStatusAilment::Okay;
         }
+        pokemon.snore_sleep_talk_counter = 0;
     }
 
     if msa_cured && cfg!(feature = "print-battle") {
-        let pokemon = state.pokemon_by_id(pokemon_id);
-        let species_name = Species::name(pokemon.species);
-        let cured_display_text = pokemon.major_status_ailment.display_text_when_cured();
-        state.add_display_text(format!("{}{}", species_name, cured_display_text));
+        let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
+        state.add_display_text(format!("{}{}", species_name, old_msa.display_text_when_cured()));
     }
 }
 
@@ -674,13 +662,12 @@ pub fn apply_damage(state: &mut State, pokemon_id: u8, amount: i16) -> bool {
 
 pub fn increment_move_pp(state: &mut State, pokemon_id: u8, move_index: u8, amount: i8) {
     let move_instance = &mut state.pokemon_by_id_mut(pokemon_id).known_moves[move_index as usize];
-    move_instance.pp = clamp(move_instance.pp as i8 + amount, 0, Move::max_pp(move_instance.move_) as i8) as u8;
+    move_instance.pp = num::clamp(move_instance.pp as i8 + amount, 0, Move::max_pp(move_instance.move_) as i8) as u8;
 }
 
 fn remove_minor_status_ailments(state: &mut State, pokemon_id: u8) {
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
-    pokemon.confusion_turn_inflicted = None;
-    pokemon.confusion_turn_will_cure = None;
+    pokemon.confusion_counter.clear();
     pokemon.is_flinching = false;
     pokemon.seeded_by = None;
     pokemon.is_infatuated = false;

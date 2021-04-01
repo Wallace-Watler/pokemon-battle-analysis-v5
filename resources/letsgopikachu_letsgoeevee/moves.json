@@ -61,7 +61,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Grass", 55, 1, 0] }
+            { "StdDamage": ["Grass", 55, 1] }
         ]
     },
     {
@@ -100,7 +100,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Normal", 40, 0, 0] }
+            { "StdDamage": ["Normal", 40, 0] }
         ]
     },
     {
@@ -126,7 +126,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            { "StdDamage": ["Grass", 45, 0, 0] }
+            { "StdDamage": ["Grass", 45, 0] }
         ]
     }
 ]
