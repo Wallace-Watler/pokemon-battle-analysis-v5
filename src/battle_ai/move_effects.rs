@@ -1,5 +1,5 @@
 use crate::battle_ai::pokemon;
-use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, Weather, Counter};
+use crate::{FieldPosition, StatIndex, MajorStatusAilment, game_version, Type, Ability, Weather, Counter, Gender};
 use crate::move_::{MoveCategory, MoveID, Move};
 use crate::species::Species;
 use crate::battle_ai::state::State;
@@ -83,6 +83,14 @@ impl Action {
                     return false;
                 }
 
+                if state.pokemon_by_id(*user_id).is_infatuated && rng.gen_bool(0.5) {
+                    if cfg!(feature = "print-battle") {
+                        let user_display_text = format!("{}", state.pokemon_by_id(*user_id));
+                        state.add_display_text(format!("{} is infatuated with the foe!", user_display_text));
+                    }
+                    return false;
+                }
+
                 let user = state.pokemon_by_id(*user_id);
                 if user.current_hp() == 0 || user.field_position() == None { return false; }
                 match move_index {
@@ -131,8 +139,13 @@ impl Action {
 
                             if Move::accuracy(*move_id).do_accuracy_check(state, *user_id, target_id, rng) {
                                 for effect in Move::effects(*move_id) {
-                                    if effect.do_effect(*move_id, state, action_queue, *user_id, target_id, rng) == EffectResult::BattleEnded {
-                                        return true;
+                                    let result = effect.do_effect(*move_id, state, action_queue, *user_id, target_id, rng);
+                                    if result.has_display_text() {
+                                        state.add_display_text(result.display_text().to_owned());
+                                    }
+                                    if state.has_battle_ended() { return true; }
+                                    if state.pokemon_by_id(*user_id).current_hp() == 0 || state.pokemon_by_id(target_id).current_hp() == 0 || result == EffectResult::Fail {
+                                        break;
                                     }
                                 }
                             } else if cfg!(feature = "print-battle") {
@@ -158,24 +171,27 @@ impl Action {
 
 #[derive(Debug, Deserialize)]
 pub enum MoveEffect {
+    Attract,
     GigaDrain,
     Growth,
     /// (stat_index: StatIndex, amount: i8)
     IncTargetStatStage(StatIndex, i8),
     LeechSeed,
+    /// (toxic: bool, chance: u8)
+    Poison(bool, u8),
     PoisonPowder,
     SleepPowder,
     /// (damage_type: Type, power: u8, critical_hit_stage_bonus: u8)
     StdDamage(Type, u8, u8),
     Struggle,
     SunnyDay,
-    Synthesis,
-    Toxic
+    Synthesis
 }
 
 impl MoveEffect {
     fn do_effect(&self, move_: MoveID, state: &mut State, action_queue: &[&Action], user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
         match self {
+            MoveEffect::Attract => attract(state, user_id, target_id),
             MoveEffect::GigaDrain => giga_drain(state, user_id, target_id, rng),
             MoveEffect::Growth => growth(state, user_id),
             MoveEffect::IncTargetStatStage(stat_index, amount) => {
@@ -183,6 +199,13 @@ impl MoveEffect {
                 EffectResult::Success
             },
             MoveEffect::LeechSeed => leech_seed(state, user_id, target_id),
+            MoveEffect::Poison(toxic, chance) => {
+                if rng.gen_range(0, 100) < *chance {
+                    pokemon::poison(state, target_id, *toxic, false)
+                } else {
+                    EffectResult::Skip
+                }
+            },
             MoveEffect::PoisonPowder => poison_powder(state, target_id),
             MoveEffect::SleepPowder => sleep_powder(state, target_id, rng),
             MoveEffect::StdDamage(damage_type, power, critical_hit_stage_bonus) => {
@@ -190,18 +213,36 @@ impl MoveEffect {
             },
             MoveEffect::Struggle => struggle(state, user_id, target_id, rng),
             MoveEffect::SunnyDay => sunny_day(state),
-            MoveEffect::Synthesis => synthesis(state, user_id),
-            MoveEffect::Toxic => toxic(state, target_id)
+            MoveEffect::Synthesis => synthesis(state, user_id)
         }
     }
 }
 
 /// The possible outcomes that a move's effect can lead to.
 #[derive(Eq, PartialEq)]
-enum EffectResult {
-    Success,
+pub enum EffectResult {
+    /// It tried and failed to do the effect
     Fail,
-    BattleEnded
+    /// It didn't have any effect
+    NoEffect,
+    /// The effect was skipped
+    Skip,
+    /// It tried and succeeded in doing the effect
+    Success
+}
+
+impl EffectResult {
+    const fn has_display_text(&self) -> bool {
+        matches!(self, EffectResult::Fail | EffectResult::NoEffect)
+    }
+
+    const fn display_text(&self) -> &'static str {
+        match self {
+            EffectResult::Fail => "But it failed!",
+            EffectResult::NoEffect => "It didn't have any effect...",
+            _ => ""
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,11 +325,7 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
 
     let type_effectiveness = damage_type.effectiveness(target_first_type, target_second_type);
     if almost::zero(type_effectiveness) {
-        if cfg!(feature = "print-battle") {
-            let target_name = Species::name(state.pokemon_by_id(target_id).species());
-            state.add_display_text(format!("It doesn't affect the opponent's {}...", target_name));
-        }
-        return (EffectResult::Fail, 0);
+        return (EffectResult::NoEffect, 0);
     }
 
     let mut calculated_atk = pokemon::calculated_stat(state, user_id, offensive_stat_index);
@@ -343,9 +380,7 @@ fn std_damage(state: &mut State, user_id: u8, target_id: u8, damage_type: Type, 
     modified_damage = modified_damage.max(1.0);
 
     let damage_dealt = modified_damage.round() as u16;
-    if pokemon::apply_damage(state, target_id, damage_dealt as i16) {
-        return (EffectResult::BattleEnded, damage_dealt);
-    }
+    pokemon::apply_damage(state, target_id, damage_dealt as i16);
     (EffectResult::Success, damage_dealt)
 }
 
@@ -360,29 +395,33 @@ fn recoil(state: &mut State, user_id: u8, numerator: u16, denominator: u8) -> Ef
     } else {
         max((numerator as f64 / denominator as f64).round() as u16, 1)
     };
-    if pokemon::apply_damage(state, user_id, recoil_damage as i16) {
-        EffectResult::BattleEnded
-    } else {
+    pokemon::apply_damage(state, user_id, recoil_damage as i16);
+    EffectResult::Success
+}
+
+fn attract(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
+    let user_gender = state.pokemon_by_id(user_id).gender;
+    let target_gender = state.pokemon_by_id(target_id).gender;
+    if user_gender == target_gender.opposite() && target_gender != Gender::None {
+        pokemon::set_infatuated(state, target_id, user_id);
         EffectResult::Success
+    } else {
+        EffectResult::Fail
     }
 }
 
 fn giga_drain(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
     let (result, damage_dealt) = std_damage(state, user_id, target_id, Type::Grass, MoveCategory::Special, if game_version().gen() <= 4 { 60 } else { 75 }, 0, rng);
-    if result != EffectResult::Success {
-        return result;
+
+    if result == EffectResult::Success && !state.has_battle_ended() {
+        if cfg!(feature = "print-battle") {
+            let target_name = Species::name(state.pokemon_by_id(target_id).species());
+            state.add_display_text(format!("{} had its health drained!", target_name));
+        }
+        pokemon::apply_damage(state, user_id, -max(damage_dealt as i16 / 2, 1));
     }
 
-    if cfg!(feature = "print-battle") {
-        let target_name = Species::name(state.pokemon_by_id(target_id).species());
-        state.add_display_text(format!("{} had its health drained!", target_name));
-    }
-
-    if pokemon::apply_damage(state, user_id, -max(damage_dealt as i16 / 2, 1)) {
-        EffectResult::BattleEnded
-    } else {
-        EffectResult::Success
-    }
+    result
 }
 
 fn growth(state: &mut State, user_id: u8) -> EffectResult {
@@ -398,20 +437,10 @@ fn growth(state: &mut State, user_id: u8) -> EffectResult {
 
 fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
     match state.pokemon_by_id(target_id).seeded_by {
-        Some(_) => {
-            if cfg!(feature = "print-battle") {
-                let target_name = Species::name(state.pokemon_by_id(target_id).species());
-                state.add_display_text(format!("{} is already seeded!", target_name));
-            }
-            EffectResult::Fail
-        },
+        Some(_) => EffectResult::Fail,
         None => {
             if state.pokemon_by_id(target_id).is_type(Type::Grass) {
-                if cfg!(feature = "print-battle") {
-                    let target_name = Species::name(state.pokemon_by_id(target_id).species());
-                    state.add_display_text(format!("It doesn't affect the opponent's {}...", target_name));
-                }
-                EffectResult::Fail
+                EffectResult::NoEffect
             } else {
                 state.pokemon_by_id_mut(target_id).seeded_by = state.pokemon_by_id(user_id).field_position();
                 if cfg!(feature = "print-battle") {
@@ -426,32 +455,16 @@ fn leech_seed(state: &mut State, user_id: u8, target_id: u8) -> EffectResult {
 
 fn poison_powder(state: &mut State, target_id: u8) -> EffectResult {
     if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
-        if cfg!(feature = "print-battle") {
-            let species_name = Species::name(state.pokemon_by_id(target_id).species());
-            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
-        }
-        return EffectResult::Fail;
+        return EffectResult::NoEffect;
     }
-    if pokemon::poison(state, target_id, false, false) {
-        EffectResult::Success
-    } else {
-        EffectResult::Fail
-    }
+    pokemon::poison(state, target_id, false, false)
 }
 
 fn sleep_powder(state: &mut State, target_id: u8, rng: &mut StdRng) -> EffectResult {
     if game_version().gen() >= 6 && state.pokemon_by_id(target_id).is_type(Type::Grass) {
-        if cfg!(feature = "print-battle") {
-            let species_name = Species::name(state.pokemon_by_id(target_id).species());
-            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
-        }
-        return EffectResult::Fail;
+        return EffectResult::NoEffect;
     }
-    if pokemon::put_to_sleep(state, target_id, rng) {
-        EffectResult::Success
-    } else {
-        EffectResult::Fail
-    }
+    pokemon::put_to_sleep(state, target_id, rng)
 }
 
 fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> EffectResult {
@@ -468,16 +481,13 @@ fn struggle(state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> 
 
 fn sunny_day(state: &mut State) -> EffectResult {
     if (game_version().gen() >= 3 && state.weather == Weather::HarshSunshine) || (game_version().gen() >= 5 && matches!(state.weather, Weather::HeavyRain | Weather::ExtremelyHarshSunshine | Weather::StrongWinds)) {
-        if cfg!(feature = "print-battle") {
-            state.add_display_text(String::from("But it failed!"));
-        }
         return EffectResult::Fail;
     }
 
     state.weather = Weather::HarshSunshine;
     state.weather_counter = Counter::new(Some(5));
     if cfg!(feature = "print-battle") {
-        state.add_display_text(String::from(Weather::HarshSunshine.display_text_on_appearance()));
+        state.add_display_text(Weather::HarshSunshine.display_text_on_appearance().to_owned());
     }
     EffectResult::Success
 }
@@ -496,12 +506,4 @@ fn synthesis(state: &mut State, user_id: u8) -> EffectResult {
     }
     pokemon::apply_damage(state, user_id, -max_hp);
     EffectResult::Success
-}
-
-fn toxic(state: &mut State, target_id: u8) -> EffectResult {
-    if pokemon::poison(state, target_id, true, false) {
-        EffectResult::Success
-    } else {
-        EffectResult::Fail
-    }
 }

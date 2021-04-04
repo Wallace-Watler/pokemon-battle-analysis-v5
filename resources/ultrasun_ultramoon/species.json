@@ -12,6 +12,7 @@
         "female_chance": 125,
         "allow_duplicates": true,
         "move_pool": [
+            "Attract",
             "Double Team",
             "Giga Drain",
             "Growl",
@@ -20,6 +21,7 @@
             "Poison Powder",
             "Razor Leaf",
             "Sleep Powder",
+            "Sludge Bomb",
             "Sunny Day",
             "Sweet Scent",
             "Synthesis",
@@ -30,7 +32,6 @@
         "_comments": [
             "TODO: Add the following moves",
             "Amnesia",
-            "Attract",
             "Bind",
             "Charm",
             "Confide",
@@ -63,7 +64,6 @@
             "Skull Bash",
             "Sleep Talk",
             "Sludge",
-            "Sludge Bomb",
             "Snore",
             "Solar Beam",
             "Substitute",

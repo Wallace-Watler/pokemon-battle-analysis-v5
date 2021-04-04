@@ -6,7 +6,7 @@ use std::cmp::min;
 use std::fmt::{Display, Error, Formatter};
 use crate::{StatIndex, MajorStatusAilment, Ability, game_version, FieldPosition, Weather, Type, Gender, Nature, AbilityID, choose_weighted_index, Counter};
 use crate::species::{SpeciesID, Species};
-use crate::battle_ai::move_effects::Action;
+use crate::battle_ai::move_effects::{Action, EffectResult};
 use crate::move_::{MoveID, Move};
 use crate::battle_ai::state::State;
 
@@ -17,7 +17,7 @@ pub struct Pokemon {
     // Types usually match the species' type, but some Pokemon can change types
     first_type: Type,
     second_type: Type,
-    gender: Gender,
+    pub gender: Gender,
     nature: Nature,
     ability: AbilityID,
     ivs: [u8; 6],
@@ -37,7 +37,7 @@ pub struct Pokemon {
     is_flinching: bool,
     /// Position of the Pokemon that seeded this Pokemon.
     pub seeded_by: Option<FieldPosition>,
-    is_infatuated: bool,
+    pub is_infatuated: bool,
     is_cursed: bool,
     has_nightmare: bool,
 
@@ -569,15 +569,11 @@ pub fn increment_stat_stage(state: &mut State, pokemon_id: u8, stat_index: StatI
 }
 
 /// Returns whether the poisoning was successful.
-pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -> bool {
+pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -> EffectResult {
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
 
     if !corrosion && (pokemon.is_type(Type::Poison) || pokemon.is_type(Type::Steel)) {
-        if cfg!(feature = "print-battle") {
-            let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
-            state.add_display_text(format!("It doesn't affect the opponent's {} ...", species_name));
-        }
-        return false;
+        return EffectResult::NoEffect;
     }
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
@@ -587,17 +583,14 @@ pub fn poison(state: &mut State, pokemon_id: u8, toxic: bool, corrosion: bool) -
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
             state.add_display_text(format!("{}{}", species_name, if toxic { MajorStatusAilment::BadlyPoisoned.display_text_when_applied() } else { MajorStatusAilment::Poisoned.display_text_when_applied() }));
         }
-        return true;
+        return EffectResult::Success;
     }
 
-    if cfg!(feature = "print-battle") {
-        state.add_display_text(String::from("But it failed!"));
-    }
-    false
+    EffectResult::Fail
 }
 
 /// Returns whether the Pokemon fell asleep.
-pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> bool {
+pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> EffectResult {
     let pokemon = state.pokemon_by_id_mut(pokemon_id);
 
     if pokemon.major_status_ailment() == MajorStatusAilment::Okay {
@@ -614,13 +607,10 @@ pub fn put_to_sleep(state: &mut State, pokemon_id: u8, rng: &mut StdRng) -> bool
             let species_name = Species::name(state.pokemon_by_id(pokemon_id).species);
             state.add_display_text(format!("{}{}", species_name, MajorStatusAilment::Asleep.display_text_when_applied()));
         }
-        return true;
+        return EffectResult::Success;
     }
 
-    if cfg!(feature = "print-battle") {
-        state.add_display_text(String::from("But it failed!"));
-    }
-    false
+    EffectResult::Fail
 }
 
 pub fn increment_msa_counter(state: &mut State, pokemon_id: u8) {
@@ -673,4 +663,11 @@ fn remove_minor_status_ailments(state: &mut State, pokemon_id: u8) {
     pokemon.is_infatuated = false;
     pokemon.is_cursed = false;
     pokemon.has_nightmare = false;
+}
+
+pub fn set_infatuated(state: &mut State, pokemon_id: u8, caused_by: u8) {
+    let pokemon_name = Species::name(state.pokemon_by_id(pokemon_id).species());
+    let caused_name = Species::name(state.pokemon_by_id(caused_by).species());
+    state.add_display_text(format!("{} became infatuated with {}!", pokemon_name, caused_name));
+    state.pokemon_by_id_mut(pokemon_id).is_infatuated = true;
 }

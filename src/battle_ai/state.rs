@@ -15,7 +15,7 @@ pub const AI_LEVEL: u8 = 3;
 
 /// Maximum number of times each agent is allowed to switch out Pokemon before it must choose a move
 /// (does not count switching one in to replace a fainted team member)
-const CONSECUTIVE_SWITCH_CAP: u16 = 2;
+const CONSECUTIVE_SWITCH_CAP: u16 = 1;
 
 pub static mut NUM_STATE_COPIES: u64 = 0;
 
@@ -134,14 +134,16 @@ impl State {
             let mut child = self.copy_game_state();
             let max_action = &self.max.actions[max_action_index];
             let min_action = &self.min.actions[min_action_index];
-            child.max.consecutive_switches = match max_action {
-                Action::Switch { .. } => child.max.consecutive_switches + 1,
-                _ => 0
-            };
-            child.min.consecutive_switches = match min_action {
-                Action::Switch { .. } => child.min.consecutive_switches + 1,
-                _ => 0
-            };
+            match max_action {
+                Action::Move { .. } => child.max.consecutive_switches = 0,
+                Action::Switch { .. } => child.max.consecutive_switches += 1,
+                Action::Nop => {}
+            }
+            match min_action {
+                Action::Move { .. } => child.min.consecutive_switches = 0,
+                Action::Switch { .. } => child.min.consecutive_switches += 1,
+                Action::Nop => {}
+            }
             play_out_turn(&mut child, vec![max_action, min_action], rng);
             generate_actions(&mut child, rng);
             self.children[child_index] = Some(Box::new(child));
@@ -313,7 +315,7 @@ fn smab_search(state: &mut State, mut alpha: f64, mut beta: f64, recursions: u8,
 }
 
 fn generate_actions(state: &mut State, rng: &mut StdRng) {
-    match state.min.on_field.zip(state.max.on_field) {
+    match state.max.on_field.zip(state.min.on_field) {
         None => agents_choose_pokemon_to_send_out(state),
         Some((max_pokemon_id, min_pokemon_id)) => { // Agents must choose actions for each Pokemon
             let max_actions = gen_actions_for_user(state, rng, max_pokemon_id);
@@ -321,10 +323,8 @@ fn generate_actions(state: &mut State, rng: &mut StdRng) {
             state.max.actions = max_actions;
             state.min.actions = min_actions;
 
-            // I don't know why reversing the comparator makes it run several times faster, but it
-            // does, so I did.
-            state.max.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2).reverse());
-            state.min.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2).reverse());
+            state.max.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2));
+            state.min.actions.sort_unstable_by(|act1, act2| action_cmp(act1, act2));
         }
     }
 
@@ -358,7 +358,7 @@ fn agents_choose_pokemon_to_send_out(state: &mut State) {
 }
 
 fn gen_actions_for_user(state: &mut State, rng: &mut StdRng, user_id: u8) -> Vec<Action> {
-    let mut actions: Vec<Action> = Vec::with_capacity(9);
+    let mut actions: Vec<Action> = Vec::new();
 
     // TODO: Is this actually what should happen?
     if let Some(next_move_action) = state.pokemon_by_id(user_id).next_move_action.clone() {

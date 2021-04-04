@@ -19,7 +19,7 @@ fn game_version() -> &'static GameVersion { unsafe { &GAME_VERSION } }
 
 fn choose_weighted_index(weights: &[f64], rng: &mut StdRng) -> usize {
     if weights.is_empty() || weights.iter().any(|d| !almost::zero(*d) && *d < 0.0) {
-        panic!(format!("Weights must be non-negative. Given weights: {:?}", weights));
+        panic!("Weights must be non-negative. Given weights: {:?}", weights);
     }
 
     let mut d = rng.gen_range::<f64, f64, f64>(0.0, weights.iter().sum());

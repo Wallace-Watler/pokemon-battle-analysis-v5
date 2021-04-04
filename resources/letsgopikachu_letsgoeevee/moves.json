@@ -78,6 +78,20 @@
         ]
     },
     {
+        "name": "Sludge Bomb",
+        "type": "Poison",
+        "category": "Special",
+        "accuracy": { "Standard": 100 },
+        "targeting": "SingleAdjacentPokemon",
+        "max_pp": 10,
+        "priority_stage": 0,
+        "sound_based": false,
+        "effects": [
+            { "StdDamage": ["Poison", 90, 0] },
+            { "Poison": [false, 30] }
+        ]
+    },
+    {
         "name": "Struggle",
         "type": "Normal",
         "category": "Physical",
@@ -113,7 +127,7 @@
         "priority_stage": 0,
         "sound_based": false,
         "effects": [
-            "Toxic"
+            { "Poison": [true, 100] }
         ]
     },
     {
