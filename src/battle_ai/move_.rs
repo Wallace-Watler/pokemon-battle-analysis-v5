@@ -1,8 +1,39 @@
 use serde::Deserialize;
 use std::fmt::Debug;
 use std::fs;
-use crate::{Type, FieldPosition, game_version};
-use crate::battle_ai::move_effects::{MoveEffect, MoveAccuracy};
+use pokemon_battle_analysis_v5::battle_ai::move_effects::{MoveEffect, MoveAccuracy};
+use rand::rngs::StdRng;
+use rand::Rng;
+use crate::battle_ai::state::State;
+use crate::battle_ai::data::{Type, StatIndex, FieldPosition};
+use crate::battle_ai::move_effects::MoveEffect;
+
+#[derive(Debug, Deserialize)]
+pub enum MoveAccuracy {
+    Ignore,
+    /// (percentage: u8)
+    Standard(u8),
+    Toxic
+}
+
+impl MoveAccuracy {
+    fn do_accuracy_check(&self, state: &mut State, user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+        match self {
+            MoveAccuracy::Ignore => true,
+            MoveAccuracy::Standard(accuracy) => MoveAccuracy::std_accuracy_check(state, *accuracy, user_id, target_id, rng),
+            MoveAccuracy::Toxic => {
+                (game_version().gen() >= 6 && state.pokemon_by_id(user_id).is_type(Type::Poison))
+                    || MoveAccuracy::std_accuracy_check(state, if game_version().gen() <= 4 { 85 } else { 90 }, user_id, target_id, rng)
+            }
+        }
+    }
+
+    fn std_accuracy_check(state: &mut State, accuracy: u8, user_id: u8, target_id: u8, rng: &mut StdRng) -> bool {
+        let user = state.pokemon_by_id(user_id);
+        let target = state.pokemon_by_id(target_id);
+        rng.gen_range::<u8, u8, u8>(0, 100) < (accuracy as f64 * accuracy_stat_stage_multiplier(num::clamp(user.stat_stage(StatIndex::Acc) - target.stat_stage(StatIndex::Eva), -6, 6))) as u8
+    }
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum MoveCategory {

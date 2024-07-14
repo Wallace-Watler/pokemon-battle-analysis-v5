@@ -1,4 +1,3 @@
-use crate::{Gender, Ability, AbilityID, Type, StatIndex, game_version};
 use crate::move_::{MoveID, Move};
 use rand::prelude::StdRng;
 use rand::Rng;
@@ -6,6 +5,8 @@ use serde::Deserialize;
 use serde::export::TryFrom;
 use std::fs;
 use std::cmp::min;
+use crate::battle_ai::data::data::{Type, StatIndex, Gender};
+use crate::battle_ai::data::move_::{MoveID, Move};
 
 pub type SpeciesID = u8;
 
